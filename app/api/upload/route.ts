@@ -1,0 +1,2 @@
+import { env } from 'cloudflare:workers';
+export async function POST(req:Request){const form=await req.formData();const file=form.get('file');if(!(file instanceof File))return Response.json({error:'File required'},{status:400});if(file.size>8_000_000)return Response.json({error:'File must be under 8 MB'},{status:413});const id=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'-')}`;await (env as unknown as {FILES:R2Bucket}).FILES.put(id,file.stream(),{httpMetadata:{contentType:file.type}});return Response.json({ok:true,key:id,name:file.name})}
