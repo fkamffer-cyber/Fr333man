@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type {Metadata} from 'next';
 import './globals.css';
-export const metadata: Metadata = { title: 'Cowboy Town Market — Krugersdorp', description: 'Explore Cowboy Town, find local traders, book a stall and run every part of market day.', openGraph: { title: 'Cowboy Town Market — Krugersdorp', description: 'Market day, made easier.', type: 'website' }, twitter: { card: 'summary', title: 'Cowboy Town Market', description: 'Explore the market, meet the traders and find your stall.' } };
+export const metadata: Metadata = {title:'FR333MAN · People building together',description:'A people-first network for independent thought, practical projects and member products.',openGraph:{title:'FR333MAN · United as intended',description:'Profiles, projects, conversations and products—built by people.',type:'website',images:['/og.png']},twitter:{card:'summary_large_image',title:'FR333MAN · United as intended',description:'People building practical freedom together.',images:['/og.png']}};
 export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en-ZA"><body>{children}</body></html>}
