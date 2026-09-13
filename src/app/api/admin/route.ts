@@ -1,0 +1,22 @@
+import {rejectCrossOrigin} from '@/lib/http';
+import {requireSteward} from '@/lib/supabase-server';
+
+const actions=new Set(['member-status','stock-adjustment','inventory-create','inventory-archive']);
+const clean=(value:unknown,max=180)=>typeof value==='string'?value.trim().slice(0,max):'';
+const unavailable=()=>Response.json({error:'Administration storage is temporarily unavailable'},{status:503});
+
+export async function GET(req:Request){
+  try{const steward=await requireSteward(req);if(!steward)return Response.json({error:'Platform steward access required'},{status:403});const {data,error}=await steward.admin.from('admin_audit').select('id,action,target_id,detail,created_at').order('created_at',{ascending:true}).limit(1000);if(error)throw error;return Response.json({records:(data??[]).map(row=>({id:row.id,title:row.target_id,data:{action:row.action,...(row.detail as object)},created_at:row.created_at}))})}catch{return unavailable()}
+}
+
+export async function POST(req:Request){
+  const originError=rejectCrossOrigin(req);if(originError)return originError;
+  try{
+    const steward=await requireSteward(req);if(!steward)return Response.json({error:'Platform steward access required'},{status:403});const body=await req.json() as {action?:unknown;title?:unknown;data?:Record<string,unknown>};const action=clean(body.action,40);const title=clean(body.title);const detail=body.data&&typeof body.data==='object'?body.data:{};if(!actions.has(action)||!title)return Response.json({error:'Invalid administration action'},{status:400});
+    if(action==='inventory-create'){const stock=Math.max(0,Math.floor(Number(detail.stock)||0));const id=clean(detail.id,80)||crypto.randomUUID();const sku=clean(detail.sku,80);const name=clean(detail.name||title);if(!sku||!name)return Response.json({error:'Product name and SKU are required'},{status:400});const {error}=await steward.admin.from('inventory').upsert({id,owner_id:steward.user.id,sku,name,stock,compliance_status:'pending_review',status:'active'});if(error)throw error}
+    if(action==='stock-adjustment'){const productId=clean(detail.productId,80);const stock=Math.max(0,Math.floor(Number(detail.stock)||0));const {error}=await steward.admin.from('inventory').update({stock,updated_at:new Date().toISOString()}).eq('id',productId);if(error)throw error}
+    if(action==='inventory-archive'){const {error}=await steward.admin.from('inventory').update({status:'archived',updated_at:new Date().toISOString()}).eq('id',clean(detail.productId,80));if(error)throw error}
+    if(action==='member-status'){const mapped:Record<string,string>={APPROVED:'approved',REVIEW:'pending_review',SUSPENDED:'suspended'};const trust=mapped[clean(detail.status,40).toUpperCase()];if(trust){const {error}=await steward.admin.from('profiles').update({trust_status:trust,updated_at:new Date().toISOString()}).eq('avatar_name',title.replace(/^@/,''));if(error)throw error}}
+    const {data,error}=await steward.admin.from('admin_audit').insert({actor_id:steward.user.id,action,target_type:action.startsWith('inventory')||action==='stock-adjustment'?'inventory':'profile',target_id:title,detail:{...detail,actedBy:steward.user.email}}).select('id').single();if(error)throw error;return Response.json({ok:true,id:data.id});
+  }catch{return unavailable()}
+}

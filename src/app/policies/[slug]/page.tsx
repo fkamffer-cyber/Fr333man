@@ -1,0 +1,7 @@
+/* eslint-disable @next/next/no-html-link-for-pages -- policy navigation intentionally uses full routes */
+import type {Metadata} from 'next';
+import {notFound} from 'next/navigation';
+import {policies} from '../policy-data';
+
+export async function generateMetadata({params}:{params:Promise<{slug:string}>}):Promise<Metadata>{const {slug}=await params;const policy=policies[slug];return policy?{title:`${policy.title} · FR333MAN`,description:policy.summary}:{title:'Policy · FR333MAN'}}
+export default async function PolicyPage({params}:{params:Promise<{slug:string}>}){const {slug}=await params;const policy=policies[slug];if(!policy)notFound();return <main className="policy-page"><nav><a href="/?view=Marketplace">FR<span>333</span>MAN</a><a href="/?view=Marketplace">← Back to marketplace</a></nav><header><p>{policy.eyebrow}</p><h1>{policy.title}</h1><span>{policy.summary}</span></header><article>{policy.sections.map(section=><section key={section.heading}><h2>{section.heading}</h2><p>{section.body}</p></section>)}<aside><b>Launch status: operational draft</b><p>Complete the merchant contact details and obtain professional review before enabling live payments.</p></aside></article><footer><a href="/policies/terms">Terms</a><a href="/policies/privacy">Privacy</a><a href="/policies/refunds">Refunds</a><a href="/policies/delivery">Delivery</a><a href="/policies/acceptable-use">Market rules</a><a href="/policies/contact">Contact</a></footer></main>}

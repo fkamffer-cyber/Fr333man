@@ -1,0 +1,8 @@
+import {rejectCrossOrigin} from '@/lib/http';
+import {authenticatedSupabase} from '@/lib/supabase-server';
+
+const accepted=new Set(['application/pdf','image/jpeg','image/png','image/webp','text/csv','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+export async function POST(req:Request){
+  const originError=rejectCrossOrigin(req);if(originError)return originError;
+  try{const auth=await authenticatedSupabase(req);if(!auth)return Response.json({error:'Sign in required'},{status:401});const form=await req.formData();const file=form.get('file');if(!(file instanceof File))return Response.json({error:'File required'},{status:400});if(file.size>8_000_000)return Response.json({error:'File must be under 8 MB'},{status:413});if(!accepted.has(file.type))return Response.json({error:'Use a PDF, image, CSV or Excel workbook'},{status:415});const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'-').slice(-120);const key=`${auth.user.id}/credentials/${crypto.randomUUID()}-${safeName}`;const {error}=await auth.client.storage.from('private-vault').upload(key,file,{contentType:file.type,upsert:false});if(error)throw error;return Response.json({ok:true,key,name:file.name})}catch{return Response.json({error:'Secure upload is temporarily unavailable'},{status:503})}
+}
