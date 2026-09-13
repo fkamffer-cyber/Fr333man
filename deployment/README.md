@@ -11,7 +11,7 @@ FR333MAN is a Next.js people platform with profiles, projects, products, invitat
 
 ## One-line setup and deploy
 
-After extracting the ZIP and setting the environment variables: `pnpm install --frozen-lockfile && pnpm run build && npx vercel --prod`
+After extracting the ZIP and setting the environment variables: `pnpm install --frozen-lockfile && pnpm run build:vercel && npx vercel --prod`
 
 ## Required environment variables
 

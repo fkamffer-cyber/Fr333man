@@ -1,3 +1,22 @@
+import { rejectCrossOrigin } from "@/lib/http";
+
+function sourceName(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "youtu.be" || host.endsWith("youtube.com")) return "YouTube";
+  if (host === "fb.com" || host.endsWith("facebook.com")) return "Facebook";
+  if (host.endsWith("linkedin.com")) return "LinkedIn";
+  return "Public website";
+}
+
+function fallbackTitle(url: URL, source: string) {
+  const segment = decodeURIComponent(
+    url.pathname.split("/").filter(Boolean).at(-1) || "",
+  )
+    .replace(/[-_]+/g, " ")
+    .trim();
+  return segment || `${source} profile`;
+}
+
 function safeUrl(value: string) {
   const url = new URL(value);
   if (!["http:", "https:"].includes(url.protocol))
@@ -42,9 +61,12 @@ function clean(value: string) {
 export async function POST(req: Request) {
   const originError = rejectCrossOrigin(req);
   if (originError) return originError;
+  let fallback: { requested: URL; source: string } | null = null;
   try {
     const body = (await req.json()) as { url?: string };
     let requested = safeUrl(String(body.url || ""));
+    const requestedSource = sourceName(requested.hostname);
+    fallback = { requested, source: requestedSource };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     let response: Response | null = null;
@@ -60,8 +82,19 @@ export async function POST(req: Request) {
       requested = safeUrl(new URL(location, requested).toString());
     }
     clearTimeout(timeout);
-    if (!response || !response.ok)
+    if (!response || !response.ok) {
+      if (["Facebook", "LinkedIn"].includes(requestedSource)) {
+        return Response.json({
+          title: fallbackTitle(requested, requestedSource),
+          description: `${requestedSource} limits automatic public previews. Review the source and complete the profile details before sending.`,
+          image: "",
+          url: requested.toString(),
+          source: requestedSource,
+          limited: true,
+        });
+      }
       throw new Error("The public page could not be read");
+    }
     const finalUrl = requested;
     const length = Number(response.headers.get("content-length") || 0);
     if (length > 2_000_000)
@@ -86,17 +119,23 @@ export async function POST(req: Request) {
         ? safeUrl(new URL(image, finalUrl).toString()).toString()
         : "",
       url: finalUrl.toString(),
-      source:
-        finalUrl.hostname.includes("youtube.com") ||
-        finalUrl.hostname === "youtu.be"
-          ? "YouTube"
-          : "Website",
+      source: sourceName(finalUrl.hostname),
+      limited: false,
     });
   } catch {
+    if (fallback && ["Facebook", "LinkedIn"].includes(fallback.source)) {
+      return Response.json({
+        title: fallbackTitle(fallback.requested, fallback.source),
+        description: `${fallback.source} limits automatic public previews. Review the source and complete the profile details before sending.`,
+        image: "",
+        url: fallback.requested.toString(),
+        source: fallback.source,
+        limited: true,
+      });
+    }
     return Response.json(
       { error: "The public page could not be previewed" },
       { status: 400 },
     );
   }
 }
-import { rejectCrossOrigin } from "@/lib/http";

@@ -242,8 +242,8 @@ export default function Home() {
         else if (label === "Membership QR") setScanSeconds(10);
         else if (label === "•••")
           show("Post actions: save and report controls will appear here");
-        else if (label.includes("Appreciate")) show("Appreciation recorded");
-        else if (label.startsWith("◯ Reply")) show("Replies opened");
+        else if (label.startsWith("♥ Love")) show("Love recorded");
+        else if (label.startsWith("◯ Comment")) show("Comments opened");
         else if (label.startsWith("⌁ Share")) show("Post link copied");
         else if (label.startsWith("✦ Support")) setModal("support");
       }}
@@ -460,7 +460,7 @@ function Feed({
                 : "Join this project"}
             </button>
           </div>
-          <PostActions show={() => {}} />
+          <PostActions postId="water-pilot" show={() => {}} />
         </article>
         <article className="post visual-post">
           <PostHead person={people[0]} time="1 hr" />
@@ -472,7 +472,7 @@ function Feed({
             src="/freeman-market-concept.jpg"
             alt="FR333MAN outdoor conversation and product hub"
           />
-          <PostActions show={() => {}} />
+          <PostActions postId="physical-hub" show={() => {}} />
         </article>
         <article className="post">
           <PostHead person={people[2]} time="3 hrs" />
@@ -486,7 +486,7 @@ function Feed({
             promoted={promoted.includes(products[2].id)}
             onPromote={() => onPromote(products[2])}
           />
-          <PostActions show={() => {}} />
+          <PostActions postId="solar-workshop" show={() => {}} />
         </article>
       </section>
       <aside className="right-rail">
@@ -1332,16 +1332,106 @@ function PostHead({ person, time }: { person: Person; time: string }) {
     </header>
   );
 }
-function PostActions({ show }: { show: (s: string) => void }) {
+type FeedComment = {
+  id: string;
+  author: string;
+  body: string;
+  age: string;
+  loves: number;
+};
+const starterComments: Record<string, FeedComment[]> = {
+  "water-pilot": [
+    { id: "w1", author: "Kabelo Nkosi", body: "I can help confirm transport for Saturday morning.", age: "6 min", loves: 8 },
+    { id: "w2", author: "Thandi Mokoena", body: "Please share the testing checklist before the volunteer briefing.", age: "12 min", loves: 5 },
+    { id: "w3", author: "Lerato Botha", body: "I can document the route and publish the findings.", age: "15 min", loves: 3 },
+  ],
+  "physical-hub": [
+    { id: "h1", author: "Amina Dlamini", body: "The question cards make it easier for new people to join a conversation.", age: "24 min", loves: 11 },
+    { id: "h2", author: "Kabelo Nkosi", body: "Let us add a QR for the current project tasks as well.", age: "41 min", loves: 7 },
+  ],
+  "solar-workshop": [
+    { id: "s1", author: "Francois Kamffer", body: "I will share it with the Randburg project circle.", age: "1 hr", loves: 9 },
+    { id: "s2", author: "Amina Dlamini", body: "A short safety preview would help people know what to expect.", age: "2 hrs", loves: 6 },
+  ],
+};
+function PostActions({ show, postId }: { show: (s: string) => void; postId: string }) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState<"Top" | "Newest">("Top");
+  const [loved, setLoved] = useState(false);
+  const [comments, setComments] = useState(starterComments[postId] || []);
+  const [draft, setDraft] = useState("");
+  const visible = [...comments].sort((a, b) =>
+    filter === "Top" ? b.loves - a.loves : b.id.localeCompare(a.id),
+  );
+  const submitComment = (event: FormEvent) => {
+    event.preventDefault();
+    const body = draft.trim();
+    if (!body) return;
+    setComments((current) => [
+      ...current,
+      { id: `${Date.now()}`, author: "Francois Kamffer", body, age: "now", loves: 0 },
+    ]);
+    setDraft("");
+    setOpen(true);
+  };
   return (
-    <footer className="post-actions">
-      <button onClick={() => show("Appreciation recorded")}>
-        ♡ Appreciate
-      </button>
-      <button onClick={() => show("Replies opened")}>◯ Reply</button>
-      <button onClick={() => show("Post link copied")}>⌁ Share</button>
-      <button onClick={() => show("Support opened")}>✦ Support</button>
-    </footer>
+    <>
+      <footer className="post-actions">
+        <button
+          className={loved ? "loved" : ""}
+          onClick={() => {
+            setLoved((value) => !value);
+            show(loved ? "Love removed" : "Love recorded");
+          }}
+        >
+          {loved ? "♥" : "♡"} Love
+        </button>
+        <button onClick={() => setOpen((value) => !value)}>
+          ◯ Comment ({comments.length})
+        </button>
+        <button onClick={() => show("Post link copied")}>⌁ Share</button>
+        <button onClick={() => show("Support opened")}>✦ Support</button>
+      </footer>
+      {open && (
+        <section className="comment-panel" aria-label="Post comments">
+          <header>
+            <b>Comments</b>
+            <div aria-label="Filter comments">
+              {(["Top", "Newest"] as const).map((option) => (
+                <button
+                  className={filter === option ? "active" : ""}
+                  onClick={() => setFilter(option)}
+                  key={option}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </header>
+          <div className="comment-list">
+            {visible.map((comment) => (
+              <article key={comment.id}>
+                <span>{comment.author.slice(0, 1)}</span>
+                <div>
+                  <b>{comment.author}</b>
+                  <p>{comment.body}</p>
+                  <small>{comment.age} · ♥ {comment.loves}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+          <form onSubmit={submitComment}>
+            <input
+              aria-label="Write a comment"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Write a useful comment…"
+            />
+            <button disabled={!draft.trim()}>Comment</button>
+          </form>
+        </section>
+      )}
+    </>
   );
 }
 function ProductCard({

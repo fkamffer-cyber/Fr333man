@@ -1,0 +1,99 @@
+.post-actions button.loved {
+  color: #a8324a;
+  font-weight: 800;
+}
+.comment-panel {
+  border-top: 1px solid var(--line);
+  margin: 20px -20px -20px;
+  padding: 18px 20px;
+  background: #fafbf8;
+}
+.comment-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.comment-panel > header > b {
+  font: 750 0.9rem "Manrope";
+}
+.comment-panel > header div {
+  display: flex;
+  gap: 5px;
+}
+.comment-panel > header button {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 0.68rem;
+}
+.comment-panel > header button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.comment-list {
+  display: grid;
+  margin-top: 10px;
+}
+.comment-list article {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 10px;
+  padding: 12px 0;
+}
+.comment-list article + article {
+  border-top: 1px solid var(--line);
+}
+.comment-list article > span {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.comment-list article div {
+  display: grid;
+  gap: 3px;
+}
+.comment-list article b {
+  font-size: 0.74rem;
+}
+.comment-list article p {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+}
+.comment-list article small {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+.comment-panel > form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.comment-panel > form input {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 10px;
+}
+.comment-panel > form button {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 750;
+}
+.comment-panel > form button:disabled {
+  opacity: 0.45;
+}
+@media (max-width: 600px) {
+  .comment-panel > form {
+    grid-template-columns: 1fr;
+  }
+}

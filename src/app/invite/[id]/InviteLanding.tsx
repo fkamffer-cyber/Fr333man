@@ -13,6 +13,40 @@ export default function InviteLanding({ id }: { id: string }) {
   const [invite, setInvite] = useState<Invite | null>(null);
   const [missing, setMissing] = useState(false);
   useEffect(() => {
+    const readPortableDraft = () => {
+      try {
+        const encoded = new URLSearchParams(window.location.hash.slice(1)).get(
+          "data",
+        );
+        if (!encoded) return null;
+        const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+        const bytes = Uint8Array.from(atob(padded), (character) =>
+          character.charCodeAt(0),
+        );
+        const data = JSON.parse(new TextDecoder().decode(bytes)) as Invite;
+        const source = new URL(String(data.sourceUrl || ""));
+        if (!["http:", "https:"].includes(source.protocol)) return null;
+        return {
+          name: String(data.name || "Invited person").slice(0, 120),
+          message: String(data.message || "").slice(0, 500),
+          sourceUrl: source.toString(),
+          source: String(data.source || "Public website").slice(0, 30),
+          description: String(data.description || "").slice(0, 500),
+          image: String(data.image || "").slice(0, 2048),
+        };
+      } catch {
+        return null;
+      }
+    };
+    if (id === "draft") {
+      const portable = readPortableDraft();
+      queueMicrotask(() => {
+        if (portable) setInvite(portable);
+        else setMissing(true);
+      });
+      return;
+    }
     void fetch(`/api/community?id=${encodeURIComponent(id)}`)
       .then(async (response) =>
         (await response.json()) as {
@@ -24,7 +58,11 @@ export default function InviteLanding({ id }: { id: string }) {
         if (record?.entity === "invitation") setInvite(record.data);
         else setMissing(true);
       })
-      .catch(() => setMissing(true));
+      .catch(() => {
+        const portable = readPortableDraft();
+        if (portable) setInvite(portable);
+        else setMissing(true);
+      });
   }, [id]);
   if (missing)
     return (

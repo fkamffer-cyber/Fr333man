@@ -8,6 +8,7 @@ type Preview = {
   image: string;
   url: string;
   source: string;
+  limited?: boolean;
 };
 export default function InviteDesk({
   show,
@@ -17,6 +18,7 @@ export default function InviteDesk({
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [message, setMessage] = useState(
     "I value the work you share and would like to invite you to claim a profile in our people-first community.",
   );
@@ -34,6 +36,7 @@ export default function InviteDesk({
       if (!response.ok) throw new Error(result.error);
       setPreview(result);
       setName(result.title);
+      setDescription(result.description);
       show("Public page preview is ready for your review");
     } catch (error) {
       show(
@@ -48,31 +51,46 @@ export default function InviteDesk({
   const create = async (event: FormEvent) => {
     event.preventDefault();
     if (!preview) return;
-    const response = await fetch("/api/community", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(await authenticatedHeaders()) },
-      body: JSON.stringify({
-        entity: "invitation",
-        title: name,
-        data: {
-          name,
-          message: message.trim().slice(0, 500),
-          sourceUrl: preview.url,
-          source: preview.source,
-          description: preview.description,
-          image: preview.image,
-          claimed: false,
+    const invitationData = {
+      name: name.trim().slice(0, 120),
+      message: message.trim().slice(0, 500),
+      sourceUrl: preview.url,
+      source: preview.source,
+      description: description.trim().slice(0, 500),
+      image: preview.image,
+      claimed: false,
+    };
+    try {
+      const response = await fetch("/api/community", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await authenticatedHeaders()),
         },
-      }),
-    });
-    const result = (await response.json()) as { id?: string; error?: string };
-    if (!response.ok || !result.id) {
-      show(result.error || "Invitation could not be created");
-      return;
+        body: JSON.stringify({
+          entity: "invitation",
+          title: invitationData.name,
+          data: invitationData,
+        }),
+      });
+      const result = (await response.json()) as {
+        id?: string | number;
+      };
+      const invitationId = String(result.id ?? "");
+      if (!response.ok || !invitationId) throw new Error();
+      setInvite(
+        `${window.location.origin}/invite/${encodeURIComponent(invitationId)}`,
+      );
+      show("Invitation profile created");
+    } catch {
+      const bytes = new TextEncoder().encode(JSON.stringify(invitationData));
+      const encoded = btoa(String.fromCharCode(...bytes))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/g, "");
+      setInvite(`${window.location.origin}/invite/draft#data=${encoded}`);
+      show("Portable invitation link created");
     }
-    const link = `${window.location.origin}/invite/${result.id}`;
-    setInvite(link);
-    show("Invitation profile created");
   };
   const copy = async () => {
     await navigator.clipboard.writeText(`${message}\n\n${invite}`);
@@ -85,15 +103,15 @@ export default function InviteDesk({
           <p>PEOPLE INVITATIONS</p>
           <h1>Invite with context</h1>
           <span>
-            Start from a public website or YouTube page, then review every
-            detail before sharing.
+            Start from Facebook, LinkedIn, YouTube or another public page, then
+            review every detail before sharing.
           </span>
         </div>
       </header>
       <div className="invite-layout">
         <form className="operations-card" onSubmit={create}>
           <label>
-            Public page or YouTube link
+            Facebook, LinkedIn, YouTube or public-page link
             <div className="url-control">
               <input
                 type="url"
@@ -119,7 +137,7 @@ export default function InviteDesk({
                   <small>{preview.source} · UNCLAIMED PROFILE DRAFT</small>
                   <h2>{name}</h2>
                   <p>
-                    {preview.description ||
+                    {description ||
                       "No public description was supplied. Add only information you can verify."}
                   </p>
                   <a href={preview.url} target="_blank" rel="noreferrer">
@@ -146,6 +164,22 @@ export default function InviteDesk({
                 />
                 <small>{message.length}/500</small>
               </label>
+              <label>
+                Public profile summary
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  placeholder="Add a short, source-checked description"
+                />
+                {preview.limited && (
+                  <small>
+                    This platform restricted its preview. Confirm the source
+                    and complete this summary manually.
+                  </small>
+                )}
+              </label>
               <p className="invite-consent">
                 Only public metadata is used. The invited person must claim the
                 draft, consent to its use and complete verification before it
@@ -157,7 +191,17 @@ export default function InviteDesk({
           {invite && (
             <div className="invite-result">
               <b>Ready to share</b>
-              <a href={invite}>{invite}</a>
+              <a href={invite} target="_blank" rel="noreferrer">
+                {invite}
+              </a>
+              <a
+                className="primary"
+                href={invite}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open invitation
+              </a>
               <button type="button" onClick={() => void copy()}>
                 Copy message and link
               </button>
