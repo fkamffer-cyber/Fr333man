@@ -1,32 +1,156 @@
-'use client';
+"use client";
 
-import {useRef, useState} from 'react';
-import {authenticatedHeaders} from './lib/supabase-browser';
+import { useMemo, useRef, useState } from "react";
+import { products, type Product } from "./platform-data";
+import { authenticatedHeaders } from "./lib/supabase-browser";
 
-const channels=[
-  {name:'Facebook Marketplace',url:'https://www.facebook.com/marketplace/create/item',note:'Open seller listing',state:'Account sign-in required'},
-  {name:'Gumtree South Africa',url:'https://www.gumtree.co.za/post.html',note:'Post an advert',state:'Account sign-in required'},
-  {name:'Bob Shop',url:'https://www.bobshop.co.za/sell',note:'Open seller centre',state:'Seller approval required'},
-  {name:'eBay',url:'https://www.ebay.com/sl/sell',note:'Open seller hub',state:'API connection required'},
+const channels = [
+  { name: "Facebook Marketplace", short: "Facebook", url: "https://www.facebook.com/marketplace/create/item" },
+  { name: "Gumtree South Africa", short: "Gumtree", url: "https://www.gumtree.co.za/post.html" },
+  { name: "Bob Shop", short: "Bob Shop", url: "https://www.bobshop.co.za/sell" },
+  { name: "eBay", short: "eBay", url: "https://www.ebay.com/sl/sell" },
 ];
 
-export default function SalesDesk({show}:{show:(message:string)=>void}){
-  const input=useRef<HTMLInputElement>(null);
-  const [uploaded,setUploaded]=useState(false);
-  const [filter,setFilter]=useState('All');
-  const stages=['All','Draft','Published','Enquiry','Sold'];
-  const upload=async(file?:File)=>{
-    if(!file)return;
-    const form=new FormData();form.set('file',file);
-    const response=await fetch('/api/upload',{method:'POST',headers:await authenticatedHeaders(),body:form});
-    if(response.ok){setUploaded(true);show('Sales workbook secured and attached to your profile')}else show('Workbook upload failed; the original file stayed on your device');
+type SalesItem = Product & {
+  sku: string;
+  condition: string;
+  quantity: string;
+  location: string;
+  delivery: string;
+  stage: "Draft" | "Published" | "Enquiry" | "Sold";
+};
+
+const inventory: SalesItem[] = products.map((product, index) => ({
+  ...product,
+  sku: `FS-${String(index + 1).padStart(4, "0")}`,
+  condition: "Confirm before publishing",
+  quantity: "Confirm stock",
+  location: product.ownerHandle === "@fr333man" ? "Randburg" : "Seller profile",
+  delivery: "Collection or delivery to be confirmed",
+  stage: index === 0 ? "Draft" : "Published",
+}));
+
+function listingText(item: SalesItem) {
+  return `${item.name}\n${item.price}\n\n${item.description}\n\nCondition: ${item.condition}\nLocation: ${item.location}\nDelivery: ${item.delivery}\nReference: ${item.sku}`;
+}
+
+export default function SalesDesk({ show }: { show: (message: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [uploaded, setUploaded] = useState(false);
+  const [stage, setStage] = useState("All");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<SalesItem | null>(inventory[0] || null);
+  const stages = ["All", "Draft", "Published", "Enquiry", "Sold"];
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return inventory.filter(
+      (item) =>
+        (stage === "All" || item.stage === stage) &&
+        (!needle || [item.name, item.sku, item.category, item.owner].some((value) => value.toLowerCase().includes(needle))),
+    );
+  }, [query, stage]);
+
+  const upload = async (file?: File) => {
+    if (!file) return;
+    const form = new FormData();
+    form.set("file", file);
+    try {
+      const response = await fetch("/api/upload", { method: "POST", headers: await authenticatedHeaders(), body: form });
+      if (!response.ok) throw new Error();
+      setUploaded(true);
+      show("Sales workbook attached. Its records are ready for reconciliation.");
+    } catch {
+      show("Workbook upload failed; the original file stayed on your device");
+    }
   };
-  return <section className="operations-shell sales-desk">
-    <header className="operations-hero"><div><p>FRANCOIS · PROFILE SALES NODE</p><h1>Sales inventory</h1><span>One supervised workspace for stock, adverts and buyer conversations.</span></div><div className="hero-actions"><input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>void upload(e.target.files?.[0])}/><button onClick={()=>input.current?.click()}>{uploaded?'Workbook attached ✓':'Attach master workbook'}</button><button className="primary" onClick={()=>show('New inventory item form is available in Administration')}>+ Add inventory</button></div></header>
-    <div className="metric-grid"><article><small>INVENTORY RECORDS</small><b>67</b><span>FS-0001 to FS-0067</span></article><article><small>ASKING VALUE</small><b>R245,100</b><span>Before offers and fees</span></article><article><small>PRODUCT PHOTOS</small><b>180</b><span>Matched and grouped</span></article><article><small>TARGETED SEARCHES</small><b>18</b><span>Product-specific groups</span></article></div>
-    <div className="operations-grid"><article className="operations-card wide"><div className="panel-head"><div><p>LISTING CONTROL</p><h2>Publishing channels</h2></div><span className="state pending">Connections needed</span></div><div className="channel-table"><div className="table-row table-header"><span>Channel</span><span>Status</span><span>Action</span></div>{channels.map(channel=><div className="table-row" key={channel.name}><b>{channel.name}</b><span>{channel.state}</span><a href={channel.url} target="_blank" rel="noreferrer">{channel.note} ↗</a></div>)}</div><div className="stage-filter" aria-label="Inventory stage">{stages.map(stage=><button className={filter===stage?'active':''} onClick={()=>setFilter(stage)} key={stage}>{stage}</button>)}</div><div className="empty-work"><b>No {filter.toLowerCase()==='all'?'live':filter.toLowerCase()} listing data connected yet.</b><span>Attach the master workbook, then connect each seller account. Publication and price acceptance remain under your approval.</span></div></article>
-      <aside className="operations-card attention"><p>LAUNCH INPUTS</p><h2>Three details still needed</h2><ol><li>Collection suburb shown to buyers</li><li>Courier or freight eligibility per item</li><li>Signed-in seller accounts</li></ol><button onClick={()=>show('Launch detail checklist opened')}>Review launch checklist</button></aside>
-    </div>
-    <article className="operations-card buyer-centre"><div><p>BUYER COMMUNICATIONS</p><h2>Supervised inbox</h2><span>Alerts and reply drafts can be centralised. Replies, final prices, addresses and payment confirmation always require approval.</span></div><div className="sla"><b>10 min</b><span>Gumtree response target</span></div><div className="pipeline"><span>New enquiries <b>0</b></span><span>Offers <b>0</b></span><span>Needs reply <b>0</b></span></div><button onClick={()=>show('Connect Gmail and seller accounts to activate the buyer inbox')}>Connect notification inbox</button></article>
-  </section>;
+
+  const copyAdvert = async (item: SalesItem) => {
+    await navigator.clipboard.writeText(listingText(item));
+    show(`${item.sku} advert copied`);
+  };
+
+  const openChannel = (item: SalesItem, channel: (typeof channels)[number]) => {
+    const opened = window.open(channel.url, "_blank", "noopener,noreferrer");
+    void navigator.clipboard.writeText(listingText(item))
+      .then(() => show(`${item.sku} advert copied. Paste it into ${channel.name}.`))
+      .catch(() => show(`${channel.name} opened for ${item.sku}`));
+    if (!opened) show(`Allow pop-ups to open ${channel.name}`);
+  };
+
+  const shareItem = async (item: SalesItem) => {
+    const url = `${window.location.origin}/products/${encodeURIComponent(item.id)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: item.name, text: listingText(item), url });
+        show(`${item.sku} shared`);
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }
+    await navigator.clipboard.writeText(`${listingText(item)}\n${url}`);
+    show(`${item.sku} listing and public link copied`);
+  };
+
+  const askingValue = inventory.reduce((total, item) => total + Number(item.price.replace(/[^0-9.]/g, "")), 0);
+
+  return (
+    <section className="operations-shell sales-desk">
+      <header className="operations-hero sales-heading">
+        <div><p>MY SALES · RANDBURG</p><h1>Explore inventory</h1><span>Open any item, check its details and prepare its advert for a sales platform.</span></div>
+        <div className="hero-actions">
+          <input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void upload(event.target.files?.[0])} />
+          <button onClick={() => input.current?.click()}>{uploaded ? "Workbook attached ✓" : "Attach master workbook"}</button>
+          <button className="primary" onClick={() => show("Add products from Administration")}>+ Add inventory</button>
+        </div>
+      </header>
+
+      <div className="metric-grid sales-metrics">
+        <article><small>VISIBLE ITEMS</small><b>{inventory.length}</b><span>Platform records</span></article>
+        <article><small>ASKING VALUE</small><b>R{askingValue.toLocaleString("en-ZA")}</b><span>Before offers and fees</span></article>
+        <article><small>PUBLISHED</small><b>{inventory.filter((item) => item.stage === "Published").length}</b><span>Available to promote</span></article>
+        <article><small>MASTER WORKBOOK</small><b>67</b><span>Rows to reconcile after upload</span></article>
+      </div>
+
+      <div className="inventory-toolbar operations-card">
+        <label><span>Search inventory</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, FS number, category or seller" /></label>
+        <div className="stage-filter" aria-label="Inventory stage">
+          {stages.map((name) => <button className={stage === name ? "active" : ""} onClick={() => setStage(name)} key={name}>{name}</button>)}
+        </div>
+      </div>
+
+      <div className="inventory-workspace">
+        <div className="inventory-list" aria-label="Sales inventory">
+          {visible.map((item) => (
+            <button className={`inventory-item ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => setSelected(item)}>
+              <i>{item.mark}</i>
+              <span><small>{item.sku} · {item.category}</small><strong>{item.name}</strong><em>{item.owner} · {item.location}</em></span>
+              <span className="inventory-price"><b>{item.price}</b><small className={`sales-stage ${item.stage.toLowerCase()}`}>{item.stage}</small></span>
+            </button>
+          ))}
+          {!visible.length && <div className="empty-work"><b>No matching inventory.</b><span>Try another search or stage.</span></div>}
+        </div>
+
+        {selected && (
+          <article className="inventory-detail operations-card">
+            <header><div className="inventory-mark">{selected.mark}</div><span><small>{selected.sku} · {selected.category}</small><h2>{selected.name}</h2><b>{selected.price}</b></span></header>
+            <p>{selected.description}</p>
+            <dl>
+              <div><dt>Seller</dt><dd>{selected.owner}</dd></div><div><dt>Condition</dt><dd>{selected.condition}</dd></div>
+              <div><dt>Stock</dt><dd>{selected.quantity}</dd></div><div><dt>Location</dt><dd>{selected.location}</dd></div>
+              <div><dt>Fulfilment</dt><dd>{selected.delivery}</dd></div><div><dt>Gift points</dt><dd>{selected.points} after eligible settlement</dd></div>
+            </dl>
+            <div className="detail-actions">
+              <a href={`/products/${selected.id}`} target="_blank" rel="noreferrer">Open public listing ↗</a>
+              <button onClick={() => void copyAdvert(selected)}>Copy advert</button>
+              <button className="primary" onClick={() => void shareItem(selected)}>Share item</button>
+            </div>
+            <section className="publish-panel"><p>PUBLISH THIS ITEM</p><span>The advert is copied first; paste it into the seller form that opens.</span><div>{channels.map((channel) => <button key={channel.name} onClick={() => openChannel(selected, channel)}>{channel.short} ↗</button>)}</div></section>
+            <small className="sales-disclaimer">Review price, condition, stock and delivery before publishing. Final publication remains under the seller’s approval.</small>
+          </article>
+        )}
+      </div>
+    </section>
+  );
 }
