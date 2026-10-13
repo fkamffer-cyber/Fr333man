@@ -52,7 +52,7 @@ No package in the final dependency list requires a persistent process, local fil
 
 1. Apply the migration, configure Google/Apple/SMS Auth providers, and set exact redirect URLs.
 2. Sign in with `PLATFORM_OWNER_EMAIL`; that account is the bootstrap steward. Then test anonymous/member/steward access separately.
-3. Complete Paystack merchant verification and add signed webhook settlement before issuing points from payments. Never award points from browser redirects.
+3. Complete Paystack merchant verification, create the approved monthly plan and configure the signed membership webhook before enabling recurring billing.
 4. Select a specialist identity/liveness provider and complete a POPIA impact assessment, retention/deletion rules, reviewer training, and explicit biometric consent. This package stores uploaded evidence privately but does not perform biometric matching.
 5. Add rate limiting/WAF controls, transactional email/SMS, monitoring, backups, restore testing, accessibility checks, and incident contacts before public launch.
 6. Point `fr333man.co.za` to Vercel only after preview acceptance.

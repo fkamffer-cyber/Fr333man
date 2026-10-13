@@ -139,7 +139,7 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
             <dl>
               <div><dt>Seller</dt><dd>{selected.owner}</dd></div><div><dt>Condition</dt><dd>{selected.condition}</dd></div>
               <div><dt>Stock</dt><dd>{selected.quantity}</dd></div><div><dt>Location</dt><dd>{selected.location}</dd></div>
-              <div><dt>Fulfilment</dt><dd>{selected.delivery}</dd></div><div><dt>Gift points</dt><dd>{selected.points} after eligible settlement</dd></div>
+              <div><dt>Fulfilment</dt><dd>{selected.delivery}</dd></div><div><dt>Membership</dt><dd>Catalogue eligibility reviewed separately</dd></div>
             </dl>
             <div className="detail-actions">
               <a href={`/products/${selected.id}`} target="_blank" rel="noreferrer">Open public listing ↗</a>

@@ -14,7 +14,7 @@ export async function POST(req:Request){
   const key=process.env.PAYSTACK_SECRET_KEY;
   if(!key)return Response.json({configured:false,message:'Paystack is not connected yet. Add the approved merchant secret after business verification.'});
   const origin=new URL(req.url).origin;
-  const response=await fetch('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({email,amount:product.amount*100,reference:`fr333man-${crypto.randomUUID()}`,callback_url:`${origin}/?view=Marketplace`,metadata:{product_id:productId,product_name:product.name,points_policy:'eligible-after-settlement'}})});
+  const response=await fetch('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({email,amount:product.amount*100,reference:`fr333man-${crypto.randomUUID()}`,callback_url:`${origin}/?view=Marketplace`,metadata:{product_id:productId,product_name:product.name}})});
   const result=await response.json();
   if(!response.ok)return Response.json({error:'Paystack could not start this checkout'},{status:502});
   return Response.json(result,{status:response.status});

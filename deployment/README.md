@@ -49,4 +49,4 @@ Use the exact connection string supplied by the Supabase dashboard because the p
 
 ## Paystack and identity boundary
 
-The included checkout route validates approved product IDs and policy acceptance, but points must only be allocated after a separately implemented and signature-verified Paystack settlement webhook. Identity evidence is stored in a private bucket; biometric/liveness matching requires an approved specialist provider and a completed POPIA/legal process.
+The product checkout validates approved product IDs and policy acceptance. Monthly People Membership billing stays disabled until an approved Paystack plan code is stored on the membership plan; signed subscription webhooks update membership status. Identity evidence is stored in a private bucket; biometric/liveness matching requires an approved specialist provider and a completed POPIA/legal process.

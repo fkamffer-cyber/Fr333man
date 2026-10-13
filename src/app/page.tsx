@@ -13,6 +13,7 @@ import {
 import SalesDesk from "./SalesDesk";
 import AdminDesk from "./AdminDesk";
 import InviteDesk from "./InviteDesk";
+import MembershipDesk from "./MembershipDesk";
 import { authenticatedHeaders } from "./lib/supabase-browser";
 
 type View =
@@ -20,6 +21,7 @@ type View =
   | "People"
   | "Projects"
   | "Marketplace"
+  | "Membership"
   | "Studio"
   | "Invites"
   | "My sales"
@@ -31,7 +33,6 @@ type Modal =
   | "post"
   | "project"
   | "product"
-  | "support"
   | "checkout"
   | "vault"
   | "scan";
@@ -40,6 +41,7 @@ const views: View[] = [
   "People",
   "Projects",
   "Marketplace",
+  "Membership",
   "Studio",
   "Invites",
   "My sales",
@@ -54,7 +56,6 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [joined, setJoined] = useState<string[]>(["soil-circles"]);
   const [promoted, setPromoted] = useState<string[]>(["npk432"]);
-  const [points, setPoints] = useState(380);
   const [saving, setSaving] = useState(false);
   const [scanSeconds, setScanSeconds] = useState(10);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -245,7 +246,10 @@ export default function Home() {
         else if (label.startsWith("♥ Love")) show("Love recorded");
         else if (label.startsWith("◯ Comment")) show("Comments opened");
         else if (label.startsWith("⌁ Share")) show("Post link copied");
-        else if (label.startsWith("✦ Support")) setModal("support");
+        else if (label.startsWith("✦ Support")) {
+          setView("Membership");
+          show("Membership benefits opened");
+        }
       }}
     >
       {notice && (
@@ -332,13 +336,13 @@ export default function Home() {
           onAdd={() => setModal("product")}
         />
       )}
+      {view === "Membership" && <MembershipDesk show={show} />}
       {view === "Studio" && <StudioView onModal={setModal} show={show} />}
       {view === "Invites" && <InviteDesk show={show} />}
       {view === "My sales" && <SalesDesk show={show} />}
       {view === "Administration" && <AdminDesk show={show} />}
       {view === "My page" && (
         <MyPage
-          points={points}
           promoted={promoted}
           onModal={setModal}
           setView={setView}
@@ -350,15 +354,9 @@ export default function Home() {
           product={selectedProduct}
           seconds={scanSeconds}
           saving={saving}
-          points={points}
           show={show}
           onClose={() => setModal("")}
           onSave={save}
-          onGift={(amount) => {
-            setPoints((v) => v - amount);
-            show(`${amount} support points sent`);
-            setModal("");
-          }}
         />
       )}
       <PolicyFooter />
@@ -392,8 +390,8 @@ function Feed({
           <span className="people-badge">PEOPLE · LIVENESS CHECKED</span>
           <dl>
             <div>
-              <dt>Support points</dt>
-              <dd>380</dd>
+              <dt>Membership</dt>
+              <dd>Preview</dd>
             </div>
             <div>
               <dt>Projects</dt>
@@ -749,9 +747,7 @@ function MarketView({
               <p>{p.description}</p>
               <div className="price">
                 <b>{p.price}</b>
-                <span>
-                  {p.points} support points after an eligible settled sale
-                </span>
+                <span>Eligible products may also appear in the monthly membership catalogue</span>
               </div>
               <div className="card-actions">
                 <button className="primary" onClick={() => onSupport(p)}>
@@ -781,10 +777,9 @@ function MarketView({
         ))}
       </div>
       <p className="legal-note">
-        Support points are non-cash platform benefits, allocated only after an
-        eligible settled transaction. They cannot be bought, withdrawn or
-        exchanged for cash. The seller remains responsible for the product,
-        delivery, returns and taxes.
+        Products are purchased directly from the named seller unless clearly
+        marked as included in a People Membership. The seller remains
+        responsible for the product, delivery, returns and taxes.
       </p>
     </section>
   );
@@ -865,12 +860,10 @@ function StudioView({
 }
 
 function MyPage({
-  points,
   promoted,
   onModal,
   setView,
 }: {
-  points: number;
   promoted: string[];
   onModal: (m: Modal) => void;
   setView: (v: View) => void;
@@ -974,14 +967,14 @@ function MyPage({
               Cancel within 14 days before the opening fee becomes due.
             </small>
           </section>
-          <section className="wallet">
-            <p>SUPPORT LEDGER</p>
-            <strong>{points}</strong>
-            <span>available points</span>
+          <section className="wallet membership-card">
+            <p>PEOPLE MEMBERSHIP</p>
+            <strong>Monthly</strong>
+            <span>Choose benefits and eligible products each month.</span>
             <div>
-              <button onClick={() => onModal("support")}>Support people</button>
+              <button onClick={() => setView("Membership")}>Choose benefits</button>
               <button onClick={() => setView("Marketplace")}>
-                Use in market
+                View products
               </button>
             </div>
           </section>
@@ -1006,17 +999,14 @@ function PlatformModal({
   product,
   seconds,
   saving,
-  points,
   show,
   onClose,
   onSave,
-  onGift,
 }: {
   kind: Modal;
   product: Product | null;
   seconds: number;
   saving: boolean;
-  points: number;
   show: (s: string) => void;
   onClose: () => void;
   onSave: (
@@ -1024,7 +1014,6 @@ function PlatformModal({
     t: string,
     d: Record<string, unknown>,
   ) => Promise<boolean>;
-  onGift: (n: number) => void;
 }) {
   const submit = (entity: string) => (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1219,27 +1208,6 @@ function PlatformModal({
               process one member&apos;s funds on behalf of another.
             </small>
           </form>
-        )}
-        {kind === "support" && (
-          <>
-            <p>PEOPLE SUPPORT PEOPLE</p>
-            <h2>Send support points.</h2>
-            <div className="points-total">
-              Available <b>{points}</b>
-            </div>
-            <div className="gift-options">
-              {[25, 50, 100].map((n) => (
-                <button disabled={n > points} onClick={() => onGift(n)} key={n}>
-                  {n}
-                  <small>points</small>
-                </button>
-              ))}
-            </div>
-            <span className="modal-note">
-              Points are non-cash membership benefits. Transfers are ledgered
-              and subject to regional limits and platform safeguards.
-            </span>
-          </>
         )}
         {kind === "vault" && (
           <form onSubmit={submit("credential")}>
