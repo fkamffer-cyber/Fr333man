@@ -1,6 +1,6 @@
 export type Person={name:string;handle:string;initials:string;region:string;status:string;color:string;skills:string[];bio:string;projects:number};
 export type Project={id:string;title:string;category:string;region:string;status:string;summary:string;progress:number;openTasks:number;people:number;tasks:string[];accent:string;icon:string};
-export type Product={id:string;name:string;owner:string;ownerHandle:string;category:string;description:string;price:string;mark:string};
+export type Product={id:string;slug?:string;name:string;owner:string;ownerHandle:string;region?:string;category:string;description:string;price:string;mark:string;condition?:string;stock?:number;membershipEligible?:boolean;checkoutEnabled?:boolean};
 export const people:Person[]=[
 {name:'Francois Kamffer',handle:'@fr333man',initials:'FK',region:'Randburg',status:'LIVENESS CHECKED',color:'#e9b63c',skills:['Research','Water','Broadcasting'],bio:'Maker, independent researcher and host of respectful, evidence-led conversations.',projects:3},
 {name:'Amina Dlamini',handle:'@amina.builds',initials:'AD',region:'Johannesburg',status:'MEMBER WITNESSED',color:'#28a887',skills:['Water systems','Logistics','Community'],bio:'Coordinates practical water resilience projects and turns plans into field work.',projects:4},

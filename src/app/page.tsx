@@ -33,6 +33,7 @@ type Modal =
   | "post"
   | "project"
   | "product"
+  | "profile"
   | "checkout"
   | "vault"
   | "scan";
@@ -70,17 +71,19 @@ export default function Home() {
   ) => {
     setSaving(true);
     try {
-      const response = await fetch("/api/community", {
-        method: "POST",
+      const marketplaceProduct = entity === "product";const profileEdit=entity==="profile-edit";
+      const response = await fetch(marketplaceProduct ? "/api/marketplace" : profileEdit ? "/api/people" : "/api/community", {
+        method: profileEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", ...(await authenticatedHeaders()) },
-        body: JSON.stringify({ entity, title, data }),
+        body: JSON.stringify(marketplaceProduct ? {action:"product-create",name:title,...data} : profileEdit ? {displayName:data.displayName,region:data.region,bio:data.bio,skills:String(data.skills||"").split(",").map(item=>item.trim()).filter(Boolean),isPublic:data.isPublic==="on"} : { entity, title, data }),
       });
-      if (!response.ok) throw new Error();
-      show(`${title} saved to the community`);
+      const result = await response.json() as {error?:string};
+      if (!response.ok) throw new Error(result.error || "Save failed");
+      show(marketplaceProduct ? `${title} submitted for marketplace review` : `${title} saved to the community`);
       setModal("");
       return true;
-    } catch {
-      show("That could not be saved. Your draft is still here.");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "That could not be saved. Your draft is still here.");
       return false;
     } finally {
       setSaving(false);
@@ -560,6 +563,9 @@ function PeopleView({
   search: string;
   setSearch: (s: string) => void;
 }) {
+  const [remotePeople,setRemotePeople]=useState<Person[]>([]);
+  useEffect(()=>{const controller=new AbortController();void fetch("/api/people",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profiles?:Array<{avatar_name:string;display_name?:string;region:string;bio:string;skills?:string[];trust_status:string}>};const mapped=(data.profiles??[]).map((profile,index)=>{const name=profile.display_name||profile.avatar_name;return{name,handle:`@${profile.avatar_name}`,initials:name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase(),region:profile.region,status:profile.trust_status.replaceAll("_"," ").toUpperCase(),color:["#e9b63c","#28a887","#709b48","#cf6e3a","#5a79bd"][index%5],skills:profile.skills??[],bio:profile.bio||"This People member has not added a public biography yet.",projects:0}});setRemotePeople(mapped)}).catch(()=>undefined);return()=>controller.abort()},[]);
+  const displayMembers=(remotePeople.length?remotePeople:members).filter(person=>`${person.name} ${person.handle} ${person.region} ${person.skills.join(" ")}`.toLowerCase().includes(search.toLowerCase()));
   return (
     <section className="page-shell">
       <header className="page-title">
@@ -577,7 +583,7 @@ function PeopleView({
         />
       </header>
       <div className="people-grid">
-        {members.map((p) => (
+        {displayMembers.map((p) => (
           <a
             className="person-card"
             href={`/people/${p.handle.slice(1)}`}
@@ -607,7 +613,7 @@ function PeopleView({
           </a>
         ))}
       </div>
-      {!members.length && (
+      {!displayMembers.length && (
         <div className="empty">
           No people match “{search}”. Try a skill or region.
         </div>
@@ -702,8 +708,11 @@ function MarketView({
   onAdd: () => void;
 }) {
   const [category, setCategory] = useState("All");
-  const categories = ["All", "Water", "Soil", "Pets", "Learning"];
-  const list = products.filter(
+  const [remoteProducts, setRemoteProducts] = useState<Product[]>([]);
+  useEffect(() => { const controller=new AbortController(); void fetch("/api/marketplace",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};setRemoteProducts(data.products??[])}).catch(()=>undefined);return()=>controller.abort(); }, []);
+  const availableProducts = remoteProducts.length ? remoteProducts : products;
+  const categories = ["All", ...Array.from(new Set(availableProducts.map(product=>product.category)))];
+  const list = availableProducts.filter(
     (p) => category === "All" || p.category === category,
   );
   return (
@@ -750,8 +759,8 @@ function MarketView({
                 <span>Eligible products may also appear in the monthly membership catalogue</span>
               </div>
               <div className="card-actions">
-                <button className="primary" onClick={() => onSupport(p)}>
-                  {p.id === "cdswater"
+                <button className="primary" onClick={() => p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
+                  {p.checkoutEnabled===false ? "View product" : p.id === "cdswater"
                     ? "Review availability"
                     : "Buy or donate"}
                 </button>
@@ -883,6 +892,7 @@ function MyPage({
           </div>
           <div className="profile-buttons">
             <button onClick={() => onModal("scan")}>Membership QR</button>
+            <button onClick={() => onModal("profile")}>Edit profile</button>
             <a className="primary" href="/onboarding">
               Continue activation
             </a>
@@ -1103,6 +1113,18 @@ function PlatformModal({
             </button>
           </form>
         )}
+        {kind === "profile" && (
+          <form onSubmit={submit("profile-edit")}>
+            <p>EDIT MY PEOPLE PROFILE</p>
+            <h2>Control what People see.</h2>
+            <label>Display name<input name="displayName" required defaultValue="Francois Kamffer" /></label>
+            <label>Region<input name="region" required defaultValue="Randburg" /></label>
+            <label>Public biography<textarea name="bio" required rows={5} defaultValue="Maker, independent researcher and host of respectful, evidence-led conversations." /></label>
+            <label>Skills, separated by commas<input name="skills" defaultValue="Research, Water, Broadcasting" /></label>
+            <label className="check"><input type="checkbox" name="isPublic" /> Publish my profile after approval.</label>
+            <button className="primary">{saving ? "Saving…" : "Save profile"}</button>
+          </form>
+        )}
         {kind === "project" && (
           <form onSubmit={submit("project")}>
             <p>PROPOSE A PROJECT</p>
@@ -1156,6 +1178,23 @@ function PlatformModal({
                 <option>Pets</option>
                 <option>Learning</option>
               </select>
+            </label>
+            <label>
+              Condition
+              <select name="condition">
+                <option value="new">New</option>
+                <option value="used">Used</option>
+                <option value="refurbished">Refurbished</option>
+                <option value="digital">Digital</option>
+                <option value="service">Service</option>
+              </select>
+            </label>
+            <label>
+              Available stock
+              <input name="stock" type="number" min="0" defaultValue="1" required />
+            </label>
+            <label className="check">
+              <input type="checkbox" name="membershipEligible" /> Make this product eligible for the monthly membership catalogue after review.
             </label>
             <label className="check">
               <input type="checkbox" required /> I confirm this item is lawful

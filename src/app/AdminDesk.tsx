@@ -35,12 +35,13 @@ export default function AdminDesk({
         if (!response.ok) throw new Error();
         return (await response.json()) as {
           records: { title: string; data: Record<string, unknown> }[];
+          products?: {id:string;name:string;sku:string|null;stock:number;compliance_status:string;status:string}[];
         };
       })
       .then((result) => {
         if (!active) return;
         const nextStatuses: Record<string, string> = {};
-        let nextStock = [...initialStock];
+        let nextStock:StockItem[] = result.products?.length ? result.products.map((item,index)=>({id:item.id,name:item.name,sku:item.sku||`SHOP-${String(index+1).padStart(4,"0")}`,stock:item.stock,status:item.compliance_status==='pending_review'?"review":item.status==='archived'?"archived":"active"})) : [...initialStock];
         for (const record of result.records) {
           const data = record.data;
           const action = String(data.action || "");
@@ -125,6 +126,7 @@ export default function AdminDesk({
       }
     });
   };
+  const reviewProduct=async(item:StockItem,status:"PERMITTED"|"BLOCKED")=>{if(await save("product-status",item.name,{productId:item.id,status})){setStock(current=>status==="PERMITTED"?current.map(row=>row.id===item.id?{...row,status:"active"}:row):current.filter(row=>row.id!==item.id))}};
   return (
     <section className="operations-shell">
       <header className="operations-hero">
@@ -271,8 +273,7 @@ export default function AdminDesk({
                   {item.stock}
                 </strong>
                 <span className="row-actions">
-                  <button onClick={() => void adjust(item, -1)}>−</button>
-                  <button onClick={() => void adjust(item, 1)}>+</button>
+                  {item.status === "review" ? <><button onClick={() => void reviewProduct(item,"PERMITTED")}>Approve</button><button className="danger" onClick={() => void reviewProduct(item,"BLOCKED")}>Block</button></> : <><button onClick={() => void adjust(item, -1)}>−</button><button onClick={() => void adjust(item, 1)}>+</button></>}
                   <button
                     className="danger"
                     onClick={() =>

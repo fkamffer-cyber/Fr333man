@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { products, type Product } from "./platform-data";
 import { authenticatedHeaders } from "./lib/supabase-browser";
 
@@ -40,16 +40,19 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
   const [stage, setStage] = useState("All");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SalesItem | null>(inventory[0] || null);
+  const [ownedInventory, setOwnedInventory] = useState<SalesItem[]>(inventory);
   const stages = ["All", "Draft", "Published", "Enquiry", "Sold"];
+
+  useEffect(() => { const controller=new AbortController(); void authenticatedHeaders().then(headers=>fetch("/api/marketplace?mine=true",{headers,signal:controller.signal})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Array<Product&{status?:string;stock?:number;condition?:string;region?:string}>};if(!data.products?.length)return;const mapped=data.products.map((product,index):SalesItem=>({...product,sku:`SHOP-${String(index+1).padStart(4,"0")}`,condition:product.condition||"Confirm before publishing",quantity:`${product.stock??0} available`,location:product.region||"Seller profile",delivery:"Collection or delivery to be confirmed",stage:product.status==="published"?"Published":product.status==="sold_out"?"Sold":"Draft"}));setOwnedInventory(mapped);setSelected(mapped[0]||null)}).catch(()=>undefined);return()=>controller.abort(); }, []);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return inventory.filter(
+    return ownedInventory.filter(
       (item) =>
         (stage === "All" || item.stage === stage) &&
         (!needle || [item.name, item.sku, item.category, item.owner].some((value) => value.toLowerCase().includes(needle))),
     );
-  }, [query, stage]);
+  }, [ownedInventory, query, stage]);
 
   const upload = async (file?: File) => {
     if (!file) return;
@@ -93,7 +96,7 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
     show(`${item.sku} listing and public link copied`);
   };
 
-  const askingValue = inventory.reduce((total, item) => total + Number(item.price.replace(/[^0-9.]/g, "")), 0);
+  const askingValue = ownedInventory.reduce((total, item) => total + Number(item.price.replace(/[^0-9.]/g, "")), 0);
 
   return (
     <section className="operations-shell sales-desk">
@@ -107,9 +110,9 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
       </header>
 
       <div className="metric-grid sales-metrics">
-        <article><small>VISIBLE ITEMS</small><b>{inventory.length}</b><span>Platform records</span></article>
+        <article><small>VISIBLE ITEMS</small><b>{ownedInventory.length}</b><span>Platform records</span></article>
         <article><small>ASKING VALUE</small><b>R{askingValue.toLocaleString("en-ZA")}</b><span>Before offers and fees</span></article>
-        <article><small>PUBLISHED</small><b>{inventory.filter((item) => item.stage === "Published").length}</b><span>Available to promote</span></article>
+        <article><small>PUBLISHED</small><b>{ownedInventory.filter((item) => item.stage === "Published").length}</b><span>Available to promote</span></article>
         <article><small>MASTER WORKBOOK</small><b>67</b><span>Rows to reconcile after upload</span></article>
       </div>
 
