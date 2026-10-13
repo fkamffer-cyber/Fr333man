@@ -746,7 +746,7 @@ function MarketView({
         {list.map((p, index) => (
           <article className="market-card" key={p.id}>
             <div className={`product-visual product-${index % 4}`}>
-              <span>{p.mark}</span>
+              {p.images?.[0]?.url?<img src={p.images[0].url} alt={p.images[0].alt}/>:<span>{p.mark}</span>}
               <em>{p.category}</em>
             </div>
             <div>
@@ -1453,7 +1453,7 @@ function ProductCard({
 }) {
   return (
     <div className="product-inline">
-      <i>{product.mark}</i>
+      {product.images?.[0]?.url?<img src={product.images[0].url} alt={product.images[0].alt}/>:<i>{product.mark}</i>}
       <span>
         <small>
           {product.category} · {product.owner}

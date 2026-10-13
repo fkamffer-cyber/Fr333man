@@ -12,7 +12,7 @@ export default async function ProductListing({ params }: { params: Promise<{ id:
     <main className="product-listing">
       <nav><Link href="/">FR<span>333</span>MAN</Link><Link href="/?view=Marketplace">Marketplace</Link></nav>
       <article>
-        <div className="listing-visual">{product.mark}</div>
+        <div className="listing-visual">{product.images?.[0]?.url?<img src={product.images[0].url} alt={product.images[0].alt}/>:product.mark}</div>
         <section className="listing-copy">
           <small>{product.category.toUpperCase()} · PUBLIC PRODUCT LISTING</small>
           <h1>{product.name}</h1><strong>{product.price}</strong><p>{product.description}</p>
