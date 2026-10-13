@@ -36,6 +36,7 @@ function listingText(item: SalesItem) {
 
 export default function SalesDesk({ show }: { show: (message: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
   const [uploaded, setUploaded] = useState(false);
   const [stage, setStage] = useState("All");
   const [query, setQuery] = useState("");
@@ -67,6 +68,8 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
       show("Workbook upload failed; the original file stayed on your device");
     }
   };
+  const updateProduct=async(item:SalesItem,changes:Record<string,unknown>)=>{try{const response=await fetch("/api/marketplace",{method:"PATCH",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({id:item.id,...changes})});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||"Product update failed");if(changes.status==="archived"){setOwnedInventory(current=>current.filter(row=>row.id!==item.id));setSelected(current=>current?.id===item.id?null:current)}else{setOwnedInventory(current=>current.map(row=>row.id===item.id?{...row,stock:typeof changes.stock==="number"?changes.stock:row.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:row.quantity,stage:changes.status==="pending_review"?"Draft":row.stage}:row));setSelected(current=>current?.id===item.id?{...current,stock:typeof changes.stock==="number"?changes.stock:current.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:current.quantity}:current)}show(`${item.name} updated`);return true}catch(error){show(error instanceof Error?error.message:"Product update failed");return false}};
+  const uploadProductImage=async(file?:File)=>{if(!file||!selected)return;const form=new FormData();form.set("file",file);form.set("productId",selected.id);form.set("alt",selected.name);try{const response=await fetch("/api/product-upload",{method:"POST",headers:await authenticatedHeaders(),body:form});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||"Image upload failed");show(`Image added to ${selected.name}`)}catch(error){show(error instanceof Error?error.message:"Image upload failed")}};
 
   const copyAdvert = async (item: SalesItem) => {
     await navigator.clipboard.writeText(listingText(item));
@@ -149,6 +152,7 @@ export default function SalesDesk({ show }: { show: (message: string) => void })
               <button onClick={() => void copyAdvert(selected)}>Copy advert</button>
               <button className="primary" onClick={() => void shareItem(selected)}>Share item</button>
             </div>
+            <section className="publish-panel"><p>MANAGE PRODUCT</p><span>Changes apply only to your product. Re-publishing returns it to steward review.</span><input ref={imageInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>void uploadProductImage(event.target.files?.[0])}/><div><button onClick={()=>imageInput.current?.click()}>Add image</button><button onClick={()=>void updateProduct(selected,{stock:Math.max(0,(selected.stock??0)-1)})}>− Stock</button><button onClick={()=>void updateProduct(selected,{stock:(selected.stock??0)+1})}>+ Stock</button><button onClick={()=>void updateProduct(selected,{status:"pending_review"})}>Submit review</button><button onClick={()=>void updateProduct(selected,{status:"paused"})}>Pause</button><button onClick={()=>void updateProduct(selected,{status:"archived"})}>Archive</button></div></section>
             <section className="publish-panel"><p>PUBLISH THIS ITEM</p><span>The advert is copied first; paste it into the seller form that opens.</span><div>{channels.map((channel) => <button key={channel.name} onClick={() => openChannel(selected, channel)}>{channel.short} ↗</button>)}</div></section>
             <small className="sales-disclaimer">Review price, condition, stock and delivery before publishing. Final publication remains under the seller’s approval.</small>
           </article>

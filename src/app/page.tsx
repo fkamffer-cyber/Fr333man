@@ -37,6 +37,7 @@ type Modal =
   | "checkout"
   | "vault"
   | "scan";
+type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;banner_url?:string|null};
 const views: View[] = [
   "Feed",
   "People",
@@ -877,18 +878,21 @@ function MyPage({
   onModal: (m: Modal) => void;
   setView: (v: View) => void;
 }) {
+  const [profile,setProfile]=useState<OwnProfile|null>(null);
+  useEffect(()=>{const controller=new AbortController();void authenticatedHeaders().then(headers=>fetch("/api/people?mine=true",{headers,signal:controller.signal})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profile?:OwnProfile};setProfile(data.profile??null)}).catch(()=>undefined);return()=>controller.abort()},[]);
+  const profileName=profile?.display_name||profile?.avatar_name||"Francois Kamffer";const profileHandle=profile?.avatar_name?`@${profile.avatar_name}`:"@fr333man";const profileInitials=profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const profileSkills=profile?.skills?.length?profile.skills:["Water","Soil biology","Research","Broadcasting"];
   return (
     <section className="my-page">
       <header className="profile-header">
         <div className="profile-banner">
-          <img src="/freeman-market-concept.jpg" alt="FR333MAN Autonomy Hub" />
+          <img src={profile?.banner_url||"/freeman-market-concept.jpg"} alt="FR333MAN Autonomy Hub" />
         </div>
         <div className="profile-main">
-          <div className="profile-orb hero-orb">FK</div>
+          <div className="profile-orb hero-orb">{profileInitials}</div>
           <div>
-            <span className="people-badge">PEOPLE · ACTIVATION 3 OF 5</span>
-            <h1>Francois Kamffer</h1>
-            <p>@fr333man · Maker, researcher and conversation host</p>
+            <span className="people-badge">PEOPLE · {profile?.trust_status?.replaceAll("_"," ").toUpperCase()||"ACTIVATION 3 OF 5"}</span>
+            <h1>{profileName}</h1>
+            <p>{profileHandle} · {profile?.region||"Randburg"}</p>
           </div>
           <div className="profile-buttons">
             <button onClick={() => onModal("scan")}>Membership QR</button>
@@ -903,17 +907,12 @@ function MyPage({
         <section>
           <article className="about-card">
             <p>ABOUT</p>
-            <h2>Questions matter more than conclusions.</h2>
+            <h2>{profile?.bio||"Questions matter more than conclusions."}</h2>
             <span>
-              Engineering, entrepreneurship, practical autonomy and independent
-              research—from water and soil to astronomy and South African
-              history.
+              This public introduction, region and the skills below are controlled by the signed-in People member.
             </span>
             <div className="skill-row">
-              <b>Water</b>
-              <b>Soil biology</b>
-              <b>Research</b>
-              <b>Broadcasting</b>
+              {profileSkills.map(skill=><b key={skill}>{skill}</b>)}
             </div>
           </article>
           <article className="profile-section">
@@ -1025,6 +1024,8 @@ function PlatformModal({
     d: Record<string, unknown>,
   ) => Promise<boolean>;
 }) {
+  const [profileDraft,setProfileDraft]=useState<OwnProfile|null>(null);
+  useEffect(()=>{if(kind!=="profile")return;let active=true;void authenticatedHeaders().then(headers=>fetch("/api/people?mine=true",{headers})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profile?:OwnProfile};if(active)setProfileDraft(data.profile??{avatar_name:"fr333man",display_name:"Francois Kamffer",region:"Randburg",bio:"",skills:[],trust_status:"pending_review",is_public:false})}).catch(()=>{if(active)setProfileDraft({avatar_name:"fr333man",display_name:"Francois Kamffer",region:"Randburg",bio:"",skills:[],trust_status:"pending_review",is_public:false})});return()=>{active=false}},[kind]);
   const submit = (entity: string) => (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -1114,16 +1115,16 @@ function PlatformModal({
           </form>
         )}
         {kind === "profile" && (
-          <form onSubmit={submit("profile-edit")}>
+          profileDraft ? <form onSubmit={submit("profile-edit")}>
             <p>EDIT MY PEOPLE PROFILE</p>
             <h2>Control what People see.</h2>
-            <label>Display name<input name="displayName" required defaultValue="Francois Kamffer" /></label>
-            <label>Region<input name="region" required defaultValue="Randburg" /></label>
-            <label>Public biography<textarea name="bio" required rows={5} defaultValue="Maker, independent researcher and host of respectful, evidence-led conversations." /></label>
-            <label>Skills, separated by commas<input name="skills" defaultValue="Research, Water, Broadcasting" /></label>
-            <label className="check"><input type="checkbox" name="isPublic" /> Publish my profile after approval.</label>
+            <label>Display name<input name="displayName" required value={profileDraft.display_name||""} onChange={event=>setProfileDraft(current=>current&&({...current,display_name:event.target.value}))} /></label>
+            <label>Region<input name="region" required value={profileDraft.region} onChange={event=>setProfileDraft(current=>current&&({...current,region:event.target.value}))} /></label>
+            <label>Public biography<textarea name="bio" required rows={5} value={profileDraft.bio} onChange={event=>setProfileDraft(current=>current&&({...current,bio:event.target.value}))} /></label>
+            <label>Skills, separated by commas<input name="skills" value={(profileDraft.skills||[]).join(", ")} onChange={event=>setProfileDraft(current=>current&&({...current,skills:event.target.value.split(",").map(item=>item.trim())}))} /></label>
+            <label className="check"><input type="checkbox" name="isPublic" checked={profileDraft.is_public} onChange={event=>setProfileDraft(current=>current&&({...current,is_public:event.target.checked}))} /> Publish my profile after approval.</label>
             <button className="primary">{saving ? "Saving…" : "Save profile"}</button>
-          </form>
+          </form> : <div className="empty-work"><b>Loading your profile…</b></div>
         )}
         {kind === "project" && (
           <form onSubmit={submit("project")}>
