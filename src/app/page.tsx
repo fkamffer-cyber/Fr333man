@@ -720,9 +720,10 @@ function MarketView({
   const [category, setCategory] = useState("All");
   const [remoteProducts, setRemoteProducts] = useState<Product[]>([]);
   const [localProducts,setLocalProducts]=useState<Product[]>([]);
+  const [localDetail,setLocalDetail]=useState<Product|null>(null);
   useEffect(() => { const controller=new AbortController(); void fetch("/api/marketplace",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};setRemoteProducts(data.products??[])}).catch(()=>undefined);return()=>controller.abort(); }, []);
   useEffect(()=>{const refresh=()=>setLocalProducts(loadLocalProducts());queueMicrotask(refresh);window.addEventListener(localProductsEvent,refresh);return()=>window.removeEventListener(localProductsEvent,refresh)},[]);
-  const availableProducts = localProducts.length?[...localProducts,...(remoteProducts.length?remoteProducts:products)]:remoteProducts.length?remoteProducts:products;
+  const availableProducts = Array.from(new Map([...localProducts,...remoteProducts].map(product=>[product.id,product])).values());
   const categories = ["All", ...Array.from(new Set(availableProducts.map(product=>product.category)))];
   const list = availableProducts.filter(
     (p) => category === "All" || p.category === category,
@@ -754,6 +755,7 @@ function MarketView({
         ))}
       </div>
       <div className="market-grid">
+        {!list.length&&<div className="empty marketplace-empty"><b>No saved marketplace products yet.</b><span>List a product to save a draft on this device. Shared products will appear here once the live database is connected.</span><button className="primary" onClick={onAdd}>+ List a product</button></div>}
         {list.map((p, index) => (
           <article className="market-card" key={p.id}>
             <div className={`product-visual product-${index % 4}`}>
@@ -771,7 +773,7 @@ function MarketView({
                 <span>Eligible products may also appear in the monthly membership catalogue</span>
               </div>
               <div className="card-actions">
-                <button className="primary" onClick={() => p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
+                <button className="primary" onClick={() => p.id.startsWith("local-") ? setLocalDetail(p) : p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
                   {p.checkoutEnabled===false ? "View product" : p.id === "cdswater"
                     ? "Review availability"
                     : "Buy or donate"}
@@ -797,6 +799,7 @@ function MarketView({
           </article>
         ))}
       </div>
+      {localDetail&&<div className="local-product-backdrop" role="presentation" onClick={()=>setLocalDetail(null)}><article className="local-product-modal" role="dialog" aria-modal="true" aria-labelledby="local-product-title" onClick={event=>event.stopPropagation()}><button className="local-product-close" aria-label="Close product details" onClick={()=>setLocalDetail(null)}>×</button><div className="local-product-visual">{localDetail.images?.[0]?.url?<img src={localDetail.images[0].url} alt={localDetail.images[0].alt}/>:<span>{localDetail.mark}</span>}</div><div className="local-product-copy"><small>LOCAL DRAFT · THIS DEVICE ONLY</small><h2 id="local-product-title">{localDetail.name}</h2><b>{localDetail.price}</b><p>{localDetail.description}</p><dl><div><dt>Category</dt><dd>{localDetail.category}</dd></div><div><dt>Condition</dt><dd>{localDetail.condition||"Not specified"}</dd></div><div><dt>Stock</dt><dd>{localDetail.stock??0}</dd></div><div><dt>Location</dt><dd>{localDetail.region||"Randburg"}</dd></div></dl><p className="local-product-note">This draft is saved only in this browser. It does not have a public product URL yet.</p><button className="primary" onClick={()=>window.location.assign("/?view=My%20sales")}>Manage in My Sales</button></div></article></div>}
       <p className="legal-note">
         Products are purchased directly from the named seller unless clearly
         marked as included in a People Membership. The seller remains
