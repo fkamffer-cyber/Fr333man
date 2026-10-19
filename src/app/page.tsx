@@ -16,6 +16,7 @@ import InviteDesk from "./InviteDesk";
 import MembershipDesk from "./MembershipDesk";
 import { authenticatedHeaders } from "./lib/supabase-browser";
 import { marketplaceCategories } from "@/lib/marketplace-taxonomy";
+import { loadLocalProducts, localProductsEvent, saveLocalProduct } from "./lib/local-products";
 
 type View =
   | "Feed"
@@ -85,7 +86,14 @@ export default function Home() {
       setModal("");
       return true;
     } catch (error) {
-      show(error instanceof Error ? error.message : "That could not be saved. Your draft is still here.");
+      const message=error instanceof Error?error.message:"That could not be saved. Your draft is still here.";
+      if(entity==="product"&&(message.includes("Sign in")||message.includes("temporarily unavailable"))){
+        saveLocalProduct({title,...data});
+        show(`${title} added to your local shop. Connect and sign in to publish it for everyone.`);
+        setModal("");
+        return true;
+      }
+      show(message);
       return false;
     } finally {
       setSaving(false);
@@ -711,8 +719,10 @@ function MarketView({
 }) {
   const [category, setCategory] = useState("All");
   const [remoteProducts, setRemoteProducts] = useState<Product[]>([]);
+  const [localProducts,setLocalProducts]=useState<Product[]>([]);
   useEffect(() => { const controller=new AbortController(); void fetch("/api/marketplace",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};setRemoteProducts(data.products??[])}).catch(()=>undefined);return()=>controller.abort(); }, []);
-  const availableProducts = remoteProducts.length ? remoteProducts : products;
+  useEffect(()=>{const refresh=()=>setLocalProducts(loadLocalProducts());queueMicrotask(refresh);window.addEventListener(localProductsEvent,refresh);return()=>window.removeEventListener(localProductsEvent,refresh)},[]);
+  const availableProducts = localProducts.length?[...localProducts,...(remoteProducts.length?remoteProducts:products)]:remoteProducts.length?remoteProducts:products;
   const categories = ["All", ...Array.from(new Set(availableProducts.map(product=>product.category)))];
   const list = availableProducts.filter(
     (p) => category === "All" || p.category === category,
