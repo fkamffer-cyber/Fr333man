@@ -1,6 +1,6 @@
 # FR333MAN deployment package
 
-FR333MAN is a Next.js people platform with profiles, projects, products, invitation drafts, onboarding, private credential uploads, inventory administration, and a supervised Paystack checkout entry point. Supabase supplies authentication, Postgres data, row-level security, and private file storage.
+FR333MAN is a Next.js people platform with profiles, projects, products, invitation drafts, onboarding, private credential uploads, inventory administration, a multichannel advert-approval and buyer-follow-up desk, and a supervised Paystack checkout entry point. Supabase supplies authentication, Postgres data, row-level security, and private file storage.
 
 ## Tech stack
 
@@ -29,7 +29,7 @@ Copy `.env.example` to `.env.local` for local development. In Vercel, add values
 ## Supabase
 
 1. Create a Supabase project.
-2. Open SQL Editor and run `deployment/supabase/migrations/202609120001_freeland_core.sql` once, or copy the root `supabase` folder into a Supabase CLI project and run `supabase db push`.
+2. Apply every SQL file in the root `supabase/migrations` directory in timestamp order, or copy the root `supabase` folder into a Supabase CLI project and run `supabase db push`. The later migrations add membership, People shops, product media, channel listings, advert approvals, renewals, and buyer leads.
 3. In Authentication, enable Google, Apple, and/or Phone providers and add `http://localhost:3001/onboarding`, the Vercel preview callback pattern, and `https://fr333man.co.za/onboarding` to allowed redirects.
 4. Put the project URL, publishable key, and service-role key into Vercel. The service-role key is server-only.
 5. Create a user whose email matches `PLATFORM_OWNER_EMAIL`; this is the bootstrap platform steward.
@@ -50,3 +50,7 @@ Use the exact connection string supplied by the Supabase dashboard because the p
 ## Paystack and identity boundary
 
 The product checkout validates approved product IDs and policy acceptance. Monthly People Membership billing stays disabled until an approved Paystack plan code is stored on the membership plan; signed subscription webhooks update membership status. Identity evidence is stored in a private bucket; biometric/liveness matching requires an approved specialist provider and a completed POPIA/legal process.
+
+## Sales-channel boundary
+
+The sales desk prepares and records adverts, requires owner approval, tracks live URLs and renewal dates, and creates WhatsApp-ready buyer replies. Facebook catalogue, eBay Inventory API, Takealot Marketplace API and Bob Shop feed publication require the relevant seller account, API approval and credentials. Gumtree publication remains an assisted hand-off to its official seller form unless Gumtree grants an approved integration. Never treat an opened seller form as a successful publication; record the returned live listing URL after the platform accepts it.

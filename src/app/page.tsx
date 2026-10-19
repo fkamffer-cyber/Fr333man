@@ -15,6 +15,7 @@ import AdminDesk from "./AdminDesk";
 import InviteDesk from "./InviteDesk";
 import MembershipDesk from "./MembershipDesk";
 import { authenticatedHeaders } from "./lib/supabase-browser";
+import { marketplaceCategories } from "@/lib/marketplace-taxonomy";
 
 type View =
   | "Feed"
@@ -1174,10 +1175,7 @@ function PlatformModal({
             <label>
               Category
               <select name="category">
-                <option>Water</option>
-                <option>Soil</option>
-                <option>Pets</option>
-                <option>Learning</option>
+                {marketplaceCategories.map(category=><option key={category}>{category}</option>)}
               </select>
             </label>
             <label>

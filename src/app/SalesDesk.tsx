@@ -1,163 +1,56 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { products, type Product } from "./platform-data";
-import { authenticatedHeaders } from "./lib/supabase-browser";
+import {FormEvent,useEffect,useMemo,useRef,useState} from "react";
+import {products,type Product} from "./platform-data";
+import {authenticatedHeaders} from "./lib/supabase-browser";
+import {marketplaceCategories,salesChannels,type SalesChannelId} from "@/lib/marketplace-taxonomy";
 
-const channels = [
-  { name: "Facebook Marketplace", short: "Facebook", url: "https://www.facebook.com/marketplace/create/item" },
-  { name: "Gumtree South Africa", short: "Gumtree", url: "https://www.gumtree.co.za/post.html" },
-  { name: "Bob Shop", short: "Bob Shop", url: "https://www.bobshop.co.za/sell" },
-  { name: "eBay", short: "eBay", url: "https://www.ebay.com/sl/sell" },
-];
+type SalesItem=Product&{sku:string;condition:string;quantity:string;location:string;delivery:string;stage:"Draft"|"Published"|"Enquiry"|"Sold"};
+type ChannelListing={id:string;product_id:string;channel:SalesChannelId;channel_category:string;status:string;advert_title:string;advert_description:string;external_url?:string|null;renew_after?:string|null;last_error?:string|null};
+type SalesLead={id:string;product_id:string;channel:string;buyer_name:string;contact_method:string;contact_value:string;stage:string;last_message:string;next_follow_up_at?:string|null;notes?:string};
 
-type SalesItem = Product & {
-  sku: string;
-  condition: string;
-  quantity: string;
-  location: string;
-  delivery: string;
-  stage: "Draft" | "Published" | "Enquiry" | "Sold";
-};
+const inventory:SalesItem[]=products.map((product,index)=>({...product,sku:`FS-${String(index+1).padStart(4,"0")}`,condition:"Confirm before publishing",quantity:"Confirm stock",location:product.ownerHandle==="@fr333man"?"Randburg":"Seller profile",delivery:"Collection or delivery to be confirmed",stage:index===0?"Draft":"Published"}));
+const leadStages=["new","contacted","interested","negotiating","payment_pending","won","lost"];
+const listingLabel=(value:string)=>value.replaceAll("_"," ").replace(/\b\w/g,letter=>letter.toUpperCase());
+const localId=()=>`local-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
 
-const inventory: SalesItem[] = products.map((product, index) => ({
-  ...product,
-  sku: `FS-${String(index + 1).padStart(4, "0")}`,
-  condition: "Confirm before publishing",
-  quantity: "Confirm stock",
-  location: product.ownerHandle === "@fr333man" ? "Randburg" : "Seller profile",
-  delivery: "Collection or delivery to be confirmed",
-  stage: index === 0 ? "Draft" : "Published",
-}));
+function listingText(item:SalesItem){return `${item.name}\n${item.price}\n\n${item.description}\n\nCondition: ${item.condition}\nLocation: ${item.location}\nDelivery: ${item.delivery}\nReference: ${item.sku}`}
+function draftListing(item:SalesItem,channel:SalesChannelId,category:string):ChannelListing{return{id:localId(),product_id:item.id,channel,channel_category:category,status:"awaiting_approval",advert_title:item.name,advert_description:listingText(item)}}
+function whatsappUrl(lead:SalesLead,item?:SalesItem){const number=lead.contact_value.replace(/\D/g,"").replace(/^0/,"27");const link=item?`${window.location.origin}/products/${encodeURIComponent(item.slug||item.id)}`:window.location.origin;const message=`Hello ${lead.buyer_name}, thank you for your interest in ${item?.name||"the item"}. ${item?.price?`The listed price is ${item.price}. `:""}You can review the full details here: ${link}. Please let me know if you would like to confirm availability or arrange collection/delivery.`;return`https://wa.me/${number}?text=${encodeURIComponent(message)}`}
 
-function listingText(item: SalesItem) {
-  return `${item.name}\n${item.price}\n\n${item.description}\n\nCondition: ${item.condition}\nLocation: ${item.location}\nDelivery: ${item.delivery}\nReference: ${item.sku}`;
-}
+export default function SalesDesk({show}:{show:(message:string)=>void}){
+  const input=useRef<HTMLInputElement>(null);const imageInput=useRef<HTMLInputElement>(null);
+  const [uploaded,setUploaded]=useState(false);const [stage,setStage]=useState("All");const [query,setQuery]=useState("");const [tab,setTab]=useState<"inventory"|"listings"|"pipeline">("inventory");
+  const [selected,setSelected]=useState<SalesItem|null>(inventory[0]||null);const [ownedInventory,setOwnedInventory]=useState<SalesItem[]>(inventory);const [category,setCategory]=useState<string>("Classifieds");
+  const [listings,setListings]=useState<ChannelListing[]>([]);const [leads,setLeads]=useState<SalesLead[]>([]);const stages=["All","Draft","Published","Enquiry","Sold"];
 
-export default function SalesDesk({ show }: { show: (message: string) => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const imageInput = useRef<HTMLInputElement>(null);
-  const [uploaded, setUploaded] = useState(false);
-  const [stage, setStage] = useState("All");
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<SalesItem | null>(inventory[0] || null);
-  const [ownedInventory, setOwnedInventory] = useState<SalesItem[]>(inventory);
-  const stages = ["All", "Draft", "Published", "Enquiry", "Sold"];
+  useEffect(()=>{queueMicrotask(()=>{try{setListings(JSON.parse(localStorage.getItem("freeland-sales-listings")||"[]"));setLeads(JSON.parse(localStorage.getItem("freeland-sales-leads")||"[]"))}catch{}});const controller=new AbortController();void Promise.all([authenticatedHeaders().then(headers=>fetch("/api/marketplace?mine=true",{headers,signal:controller.signal})),authenticatedHeaders().then(headers=>fetch("/api/sales-desk",{headers,signal:controller.signal}))]).then(async([productsResponse,salesResponse])=>{if(productsResponse.ok){const data=await productsResponse.json() as {products?:Array<Product&{status?:string;stock?:number;condition?:string;region?:string}>};if(data.products?.length){const mapped=data.products.map((product,index):SalesItem=>({...product,sku:`SHOP-${String(index+1).padStart(4,"0")}`,condition:product.condition||"Confirm before publishing",quantity:`${product.stock??0} available`,location:product.region||"Seller profile",delivery:"Collection or delivery to be confirmed",stage:product.status==="published"?"Published":product.status==="sold_out"?"Sold":"Draft"}));setOwnedInventory(mapped);setSelected(mapped[0]||null)}}if(salesResponse.ok){const data=await salesResponse.json() as {listings?:ChannelListing[];leads?:SalesLead[]};setListings(data.listings??[]);setLeads(data.leads??[])}}).catch(()=>undefined);return()=>controller.abort()},[]);
+  useEffect(()=>{localStorage.setItem("freeland-sales-listings",JSON.stringify(listings))},[listings]);useEffect(()=>{localStorage.setItem("freeland-sales-leads",JSON.stringify(leads))},[leads]);
 
-  useEffect(() => { const controller=new AbortController(); void authenticatedHeaders().then(headers=>fetch("/api/marketplace?mine=true",{headers,signal:controller.signal})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Array<Product&{status?:string;stock?:number;condition?:string;region?:string}>};if(!data.products?.length)return;const mapped=data.products.map((product,index):SalesItem=>({...product,sku:`SHOP-${String(index+1).padStart(4,"0")}`,condition:product.condition||"Confirm before publishing",quantity:`${product.stock??0} available`,location:product.region||"Seller profile",delivery:"Collection or delivery to be confirmed",stage:product.status==="published"?"Published":product.status==="sold_out"?"Sold":"Draft"}));setOwnedInventory(mapped);setSelected(mapped[0]||null)}).catch(()=>undefined);return()=>controller.abort(); }, []);
+  const visible=useMemo(()=>{const needle=query.trim().toLowerCase();return ownedInventory.filter(item=>(stage==="All"||item.stage===stage)&&(!needle||[item.name,item.sku,item.category,item.owner].some(value=>value.toLowerCase().includes(needle))))},[ownedInventory,query,stage]);
+  const selectedListings=listings.filter(listing=>listing.product_id===selected?.id);
+  const request=async(method:string,body:Record<string,unknown>)=>{const response=await fetch("/api/sales-desk",{method,headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify(body)});const result=await response.json() as Record<string,unknown>&{error?:string};if(!response.ok)throw new Error(result.error||"Sales workspace request failed");return result};
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return ownedInventory.filter(
-      (item) =>
-        (stage === "All" || item.stage === stage) &&
-        (!needle || [item.name, item.sku, item.category, item.owner].some((value) => value.toLowerCase().includes(needle))),
-    );
-  }, [ownedInventory, query, stage]);
-
-  const upload = async (file?: File) => {
-    if (!file) return;
-    const form = new FormData();
-    form.set("file", file);
-    try {
-      const response = await fetch("/api/upload", { method: "POST", headers: await authenticatedHeaders(), body: form });
-      if (!response.ok) throw new Error();
-      setUploaded(true);
-      show("Sales workbook attached. Its records are ready for reconciliation.");
-    } catch {
-      show("Workbook upload failed; the original file stayed on your device");
-    }
-  };
-  const updateProduct=async(item:SalesItem,changes:Record<string,unknown>)=>{try{const response=await fetch("/api/marketplace",{method:"PATCH",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({id:item.id,...changes})});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||"Product update failed");if(changes.status==="archived"){setOwnedInventory(current=>current.filter(row=>row.id!==item.id));setSelected(current=>current?.id===item.id?null:current)}else{setOwnedInventory(current=>current.map(row=>row.id===item.id?{...row,stock:typeof changes.stock==="number"?changes.stock:row.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:row.quantity,stage:changes.status==="pending_review"?"Draft":row.stage}:row));setSelected(current=>current?.id===item.id?{...current,stock:typeof changes.stock==="number"?changes.stock:current.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:current.quantity}:current)}show(`${item.name} updated`);return true}catch(error){show(error instanceof Error?error.message:"Product update failed");return false}};
+  const upload=async(file?:File)=>{if(!file)return;const form=new FormData();form.set("file",file);try{const response=await fetch("/api/upload",{method:"POST",headers:await authenticatedHeaders(),body:form});if(!response.ok)throw new Error();setUploaded(true);show("Sales workbook attached. Its records are ready for reconciliation.")}catch{show("Workbook upload needs the live database connection; the original file stayed on your device")}};
+  const updateProduct=async(item:SalesItem,changes:Record<string,unknown>)=>{try{const response=await fetch("/api/marketplace",{method:"PATCH",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({id:item.id,...changes})});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||"Product update failed");if(changes.status==="archived"){setOwnedInventory(current=>current.filter(row=>row.id!==item.id));setSelected(current=>current?.id===item.id?null:current)}else{setOwnedInventory(current=>current.map(row=>row.id===item.id?{...row,stock:typeof changes.stock==="number"?changes.stock:row.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:row.quantity,stage:changes.status==="pending_review"?"Draft":row.stage}:row));setSelected(current=>current?.id===item.id?{...current,stock:typeof changes.stock==="number"?changes.stock:current.stock,quantity:typeof changes.stock==="number"?`${changes.stock} available`:current.quantity}:current)}show(`${item.name} updated`)}catch(error){show(error instanceof Error?error.message:"Product update failed")}};
   const uploadProductImage=async(file?:File)=>{if(!file||!selected)return;const form=new FormData();form.set("file",file);form.set("productId",selected.id);form.set("alt",selected.name);try{const response=await fetch("/api/product-upload",{method:"POST",headers:await authenticatedHeaders(),body:form});const result=await response.json() as {error?:string;image?:{url:string;alt:string}};if(!response.ok||!result.image)throw new Error(result.error||"Image upload failed");const image={url:result.image.url,alt:result.image.alt};setOwnedInventory(current=>current.map(row=>row.id===selected.id?{...row,images:[...(row.images||[]),image]}:row));setSelected(current=>current?.id===selected.id?{...current,images:[...(current.images||[]),image]}:current);if(imageInput.current)imageInput.current.value="";show(`Image added to ${selected.name}`)}catch(error){show(error instanceof Error?error.message:"Image upload failed")}};
+  const prepareListing=async(channel:SalesChannelId)=>{if(!selected)return;let listing=draftListing(selected,channel,category);try{const result=await request("POST",{action:"listing-draft",productId:selected.id,channel,category});listing=result.listing as ChannelListing;show(`${salesChannels.find(item=>item.id===channel)?.name} advert sent for your approval`)}catch{show("Advert saved in this browser. Connect Supabase to share it with the agent.")}setListings(current=>[listing,...current.filter(item=>!(item.product_id===selected.id&&item.channel===channel))]);setTab("listings")};
+  const changeListing=async(listing:ChannelListing,status:string,extra:Record<string,unknown>={})=>{let updated={...listing,status,...extra} as ChannelListing;try{if(!listing.id.startsWith("local-")){const result=await request("PATCH",{kind:"listing",id:listing.id,status,...extra});updated=result.listing as ChannelListing}show(status==="approved"?"Advert approved. It can now be published.":"Listing status updated")}catch(error){show(error instanceof Error?error.message:"Listing update failed");if(!listing.id.startsWith("local-"))return}setListings(current=>current.map(item=>item.id===listing.id?updated:item))};
+  const openApproved=async(listing:ChannelListing)=>{if(!["approved","listed","expired"].includes(listing.status)){show("Approve the advert before opening the sales channel");return}const channel=salesChannels.find(item=>item.id===listing.channel);if(!channel)return;await navigator.clipboard.writeText(`${listing.advert_title}\n\n${listing.advert_description}`);window.open(channel.url,"_blank","noopener,noreferrer");show(`Approved advert copied. Paste it into ${channel.name}, then record the live URL.`)};
+  const markLive=(listing:ChannelListing)=>(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=new FormData(event.currentTarget);const externalUrl=String(form.get("externalUrl")||"");const renewDays=Number(form.get("renewDays")||30);void changeListing(listing,"listed",{externalUrl,renewDays,external_url:externalUrl,renew_after:new Date(Date.now()+renewDays*86400000).toISOString()})};
+  const addLead=(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();if(!selected)return;const form=new FormData(event.currentTarget);const local:SalesLead={id:localId(),product_id:selected.id,channel:String(form.get("channel")||"freeland"),buyer_name:String(form.get("buyerName")||""),contact_method:String(form.get("contactMethod")||"platform"),contact_value:String(form.get("contactValue")||""),stage:"new",last_message:String(form.get("lastMessage")||""),next_follow_up_at:String(form.get("nextFollowUpAt")||"")||null,notes:""};void request("POST",{action:"lead-create",productId:selected.id,buyerName:local.buyer_name,channel:local.channel,contactMethod:local.contact_method,contactValue:local.contact_value,lastMessage:local.last_message,nextFollowUpAt:local.next_follow_up_at}).then(result=>{setLeads(current=>[result.lead as SalesLead,...current]);show("Buyer added to the shared pipeline")}).catch(()=>{setLeads(current=>[local,...current]);show("Buyer saved in this browser. Connect Supabase for shared agent follow-up.")});event.currentTarget.reset()};
+  const changeLead=async(lead:SalesLead,nextStage:string)=>{let updated={...lead,stage:nextStage};try{if(!lead.id.startsWith("local-")){const result=await request("PATCH",{kind:"lead",id:lead.id,stage:nextStage});updated=result.lead as SalesLead}}catch(error){show(error instanceof Error?error.message:"Lead update failed");return}setLeads(current=>current.map(item=>item.id===lead.id?updated:item))};
+  const copyAdvert=async(item:SalesItem)=>{await navigator.clipboard.writeText(listingText(item));show(`${item.sku} advert copied`)};
+  const shareItem=async(item:SalesItem)=>{const url=`${window.location.origin}/products/${encodeURIComponent(item.id)}`;if(navigator.share){try{await navigator.share({title:item.name,text:listingText(item),url});show(`${item.sku} shared`);return}catch(error){if(error instanceof DOMException&&error.name==="AbortError")return}}await navigator.clipboard.writeText(`${listingText(item)}\n${url}`);show(`${item.sku} listing and public link copied`)};
+  const askingValue=ownedInventory.reduce((total,item)=>total+Number(item.price.replace(/[^0-9.]/g,"")),0);const due=listings.filter(item=>item.renew_after&&new Date(item.renew_after)<=new Date()&&item.status==="listed").length;
 
-  const copyAdvert = async (item: SalesItem) => {
-    await navigator.clipboard.writeText(listingText(item));
-    show(`${item.sku} advert copied`);
-  };
-
-  const openChannel = (item: SalesItem, channel: (typeof channels)[number]) => {
-    const opened = window.open(channel.url, "_blank", "noopener,noreferrer");
-    void navigator.clipboard.writeText(listingText(item))
-      .then(() => show(`${item.sku} advert copied. Paste it into ${channel.name}.`))
-      .catch(() => show(`${channel.name} opened for ${item.sku}`));
-    if (!opened) show(`Allow pop-ups to open ${channel.name}`);
-  };
-
-  const shareItem = async (item: SalesItem) => {
-    const url = `${window.location.origin}/products/${encodeURIComponent(item.id)}`;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: item.name, text: listingText(item), url });
-        show(`${item.sku} shared`);
-        return;
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      }
-    }
-    await navigator.clipboard.writeText(`${listingText(item)}\n${url}`);
-    show(`${item.sku} listing and public link copied`);
-  };
-
-  const askingValue = ownedInventory.reduce((total, item) => total + Number(item.price.replace(/[^0-9.]/g, "")), 0);
-
-  return (
-    <section className="operations-shell sales-desk">
-      <header className="operations-hero sales-heading">
-        <div><p>MY SALES · RANDBURG</p><h1>Explore inventory</h1><span>Open any item, check its details and prepare its advert for a sales platform.</span></div>
-        <div className="hero-actions">
-          <input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void upload(event.target.files?.[0])} />
-          <button onClick={() => input.current?.click()}>{uploaded ? "Workbook attached ✓" : "Attach master workbook"}</button>
-          <button className="primary" onClick={() => show("Add products from Administration")}>+ Add inventory</button>
-        </div>
-      </header>
-
-      <div className="metric-grid sales-metrics">
-        <article><small>VISIBLE ITEMS</small><b>{ownedInventory.length}</b><span>Platform records</span></article>
-        <article><small>ASKING VALUE</small><b>R{askingValue.toLocaleString("en-ZA")}</b><span>Before offers and fees</span></article>
-        <article><small>PUBLISHED</small><b>{ownedInventory.filter((item) => item.stage === "Published").length}</b><span>Available to promote</span></article>
-        <article><small>MASTER WORKBOOK</small><b>67</b><span>Rows to reconcile after upload</span></article>
-      </div>
-
-      <div className="inventory-toolbar operations-card">
-        <label><span>Search inventory</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, FS number, category or seller" /></label>
-        <div className="stage-filter" aria-label="Inventory stage">
-          {stages.map((name) => <button className={stage === name ? "active" : ""} onClick={() => setStage(name)} key={name}>{name}</button>)}
-        </div>
-      </div>
-
-      <div className="inventory-workspace">
-        <div className="inventory-list" aria-label="Sales inventory">
-          {visible.map((item) => (
-            <button className={`inventory-item ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => setSelected(item)}>
-              <i>{item.mark}</i>
-              <span><small>{item.sku} · {item.category}</small><strong>{item.name}</strong><em>{item.owner} · {item.location}</em></span>
-              <span className="inventory-price"><b>{item.price}</b><small className={`sales-stage ${item.stage.toLowerCase()}`}>{item.stage}</small></span>
-            </button>
-          ))}
-          {!visible.length && <div className="empty-work"><b>No matching inventory.</b><span>Try another search or stage.</span></div>}
-        </div>
-
-        {selected && (
-          <article className="inventory-detail operations-card">
-            <header>{selected.images?.[0]?.url?<img className="inventory-photo" src={selected.images[0].url} alt={selected.images[0].alt}/>:<div className="inventory-mark">{selected.mark}</div>}<span><small>{selected.sku} · {selected.category}</small><h2>{selected.name}</h2><b>{selected.price}</b></span></header>
-            <p>{selected.description}</p>
-            <dl>
-              <div><dt>Seller</dt><dd>{selected.owner}</dd></div><div><dt>Condition</dt><dd>{selected.condition}</dd></div>
-              <div><dt>Stock</dt><dd>{selected.quantity}</dd></div><div><dt>Location</dt><dd>{selected.location}</dd></div>
-              <div><dt>Fulfilment</dt><dd>{selected.delivery}</dd></div><div><dt>Membership</dt><dd>Catalogue eligibility reviewed separately</dd></div>
-            </dl>
-            <div className="detail-actions">
-              <a href={`/products/${selected.id}`} target="_blank" rel="noreferrer">Open public listing ↗</a>
-              <button onClick={() => void copyAdvert(selected)}>Copy advert</button>
-              <button className="primary" onClick={() => void shareItem(selected)}>Share item</button>
-            </div>
-            <section className="publish-panel"><p>MANAGE PRODUCT</p><span>Changes apply only to your product. Re-publishing returns it to steward review.</span><input ref={imageInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>void uploadProductImage(event.target.files?.[0])}/><div><button onClick={()=>imageInput.current?.click()}>Add image</button><button onClick={()=>void updateProduct(selected,{stock:Math.max(0,(selected.stock??0)-1)})}>− Stock</button><button onClick={()=>void updateProduct(selected,{stock:(selected.stock??0)+1})}>+ Stock</button><button onClick={()=>void updateProduct(selected,{status:"pending_review"})}>Submit review</button><button onClick={()=>void updateProduct(selected,{status:"paused"})}>Pause</button><button onClick={()=>void updateProduct(selected,{status:"archived"})}>Archive</button></div></section>
-            <section className="publish-panel"><p>PUBLISH THIS ITEM</p><span>The advert is copied first; paste it into the seller form that opens.</span><div>{channels.map((channel) => <button key={channel.name} onClick={() => openChannel(selected, channel)}>{channel.short} ↗</button>)}</div></section>
-            <small className="sales-disclaimer">Review price, condition, stock and delivery before publishing. Final publication remains under the seller’s approval.</small>
-          </article>
-        )}
-      </div>
-    </section>
-  );
+  return <section className="operations-shell sales-desk">
+    <header className="operations-hero sales-heading"><div><p>MY SALES · RANDBURG</p><h1>Multichannel sales desk</h1><span>Load once, approve each advert, track every channel and follow interested buyers through to sale.</span></div><div className="hero-actions"><input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" onChange={event=>void upload(event.target.files?.[0])}/><button onClick={()=>input.current?.click()}>{uploaded?"Workbook attached ✓":"Attach master workbook"}</button><button className="primary" onClick={()=>show("Use Marketplace → List a product to add inventory")}>+ Add inventory</button></div></header>
+    <div className="metric-grid sales-metrics"><article><small>INVENTORY</small><b>{ownedInventory.length}</b><span>Owned products</span></article><article><small>ASKING VALUE</small><b>R{askingValue.toLocaleString("en-ZA")}</b><span>Before fees</span></article><article><small>CHANNEL LISTINGS</small><b>{listings.filter(item=>item.status==="listed").length}</b><span>{due} due for renewal</span></article><article><small>OPEN BUYERS</small><b>{leads.filter(item=>!["won","lost"].includes(item.stage)).length}</b><span>Need follow-up</span></article></div>
+    <div className="sales-tabs"><button className={tab==="inventory"?"active":""} onClick={()=>setTab("inventory")}>Inventory & publishing</button><button className={tab==="listings"?"active":""} onClick={()=>setTab("listings")}>Advert approvals ({listings.filter(item=>item.status==="awaiting_approval").length})</button><button className={tab==="pipeline"?"active":""} onClick={()=>setTab("pipeline")}>Buyer pipeline ({leads.length})</button></div>
+    {tab==="inventory"&&<><div className="inventory-toolbar operations-card"><label><span>Search inventory</span><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Name, FS number, category or seller"/></label><div className="stage-filter">{stages.map(name=><button className={stage===name?"active":""} onClick={()=>setStage(name)} key={name}>{name}</button>)}</div></div><div className="inventory-workspace"><div className="inventory-list">{visible.map(item=><button className={`inventory-item ${selected?.id===item.id?"selected":""}`} key={item.id} onClick={()=>setSelected(item)}><i>{item.mark}</i><span><small>{item.sku} · {item.category}</small><strong>{item.name}</strong><em>{item.owner} · {item.location}</em></span><span className="inventory-price"><b>{item.price}</b><small className={`sales-stage ${item.stage.toLowerCase()}`}>{item.stage}</small></span></button>)}</div>{selected&&<article className="inventory-detail operations-card"><header>{selected.images?.[0]?.url?<img className="inventory-photo" src={selected.images[0].url} alt={selected.images[0].alt}/>:<div className="inventory-mark">{selected.mark}</div>}<span><small>{selected.sku} · {selected.category}</small><h2>{selected.name}</h2><b>{selected.price}</b></span></header><p>{selected.description}</p><dl><div><dt>Seller</dt><dd>{selected.owner}</dd></div><div><dt>Condition</dt><dd>{selected.condition}</dd></div><div><dt>Stock</dt><dd>{selected.quantity}</dd></div><div><dt>Location</dt><dd>{selected.location}</dd></div></dl><div className="detail-actions"><a href={`/products/${selected.id}`} target="_blank" rel="noreferrer">Public listing ↗</a><button onClick={()=>void copyAdvert(selected)}>Copy advert</button><button className="primary" onClick={()=>void shareItem(selected)}>Share</button></div><section className="publish-panel"><p>PRODUCT CONTROL</p><input ref={imageInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>void uploadProductImage(event.target.files?.[0])}/><div><button onClick={()=>imageInput.current?.click()}>Add image</button><button onClick={()=>void updateProduct(selected,{stock:Math.max(0,(selected.stock??0)-1)})}>− Stock</button><button onClick={()=>void updateProduct(selected,{stock:(selected.stock??0)+1})}>+ Stock</button><button onClick={()=>void updateProduct(selected,{status:"pending_review"})}>Review</button></div></section><section className="channel-builder"><p>PREPARE CHANNEL ADVERTS</p><label>Marketplace category<select value={category} onChange={event=>setCategory(event.target.value)}>{marketplaceCategories.map(item=><option key={item}>{item}</option>)}</select></label><div>{salesChannels.map(channel=>{const current=selectedListings.find(item=>item.channel===channel.id);return <button key={channel.id} onClick={()=>void prepareListing(channel.id)}><b>{channel.short}</b><small>{current?listingLabel(current.status):"Not prepared"}</small></button>})}</div><small>Every advert enters your approval queue before publishing. Direct API publishing activates only after that seller account is connected.</small></section></article>}</div></>}
+    {tab==="listings"&&<div className="listing-board">{listings.length?listings.map(listing=>{const channel=salesChannels.find(item=>item.id===listing.channel);const item=ownedInventory.find(product=>product.id===listing.product_id);return <article className="operations-card listing-review" key={listing.id}><header><span><small>{channel?.name} · {listing.channel_category}</small><h2>{listing.advert_title}</h2></span><b className={`listing-status ${listing.status}`}>{listingLabel(listing.status)}</b></header><pre>{listing.advert_description}</pre><div className="listing-actions">{listing.status==="awaiting_approval"&&<button className="primary" onClick={()=>void changeListing(listing,"approved")}>Approve advert</button>}<button onClick={()=>void navigator.clipboard.writeText(`${listing.advert_title}\n\n${listing.advert_description}`)}>Copy</button>{["approved","listed","expired"].includes(listing.status)&&<button onClick={()=>void openApproved(listing)}>{listing.status==="listed"?"Open / renew":"Open seller form"} ↗</button>}<button onClick={()=>void changeListing(listing,"awaiting_approval")}>Return to draft</button></div>{["approved","listed","expired"].includes(listing.status)&&<form className="live-listing-form" onSubmit={markLive(listing)}><label>Live listing URL<input name="externalUrl" type="url" defaultValue={listing.external_url||""} placeholder="https://…" required/></label><label>Renew after<select name="renewDays" defaultValue="30"><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label><button>Mark live / renewed</button></form>}<footer><span>Product: {item?.name||listing.product_id}</span><span>{listing.renew_after?`Renew ${new Date(listing.renew_after).toLocaleDateString("en-ZA")}`:"Not yet live"}</span></footer></article>}).reverse():<div className="empty-work"><b>No adverts prepared.</b><span>Select an inventory item and choose a sales channel.</span></div>}</div>}
+    {tab==="pipeline"&&<><form className="lead-form operations-card" onSubmit={addLead}><p>CAPTURE BUYER INTEREST</p><select name="productId" value={selected?.id||""} onChange={event=>setSelected(ownedInventory.find(item=>item.id===event.target.value)||null)}>{ownedInventory.map(item=><option value={item.id} key={item.id}>{item.name}</option>)}</select><input name="buyerName" placeholder="Buyer name" required/><select name="channel">{["freeland",...salesChannels.map(item=>item.id),"whatsapp"].map(item=><option key={item} value={item}>{listingLabel(item)}</option>)}</select><select name="contactMethod"><option value="platform">Platform message</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="phone">Phone</option></select><input name="contactValue" placeholder="Phone, email or thread reference"/><input name="nextFollowUpAt" type="datetime-local"/><textarea name="lastMessage" placeholder="What did the buyer ask?" rows={2}/><button className="primary">Add to pipeline</button></form><div className="pipeline-board">{leadStages.map(stageName=><section key={stageName}><header>{listingLabel(stageName)} <b>{leads.filter(lead=>lead.stage===stageName).length}</b></header>{leads.filter(lead=>lead.stage===stageName).map(lead=>{const item=ownedInventory.find(product=>product.id===lead.product_id);return <article key={lead.id}><small>{listingLabel(lead.channel)} · {item?.name||"Product"}</small><h3>{lead.buyer_name}</h3><p>{lead.last_message||"No message captured."}</p>{lead.next_follow_up_at&&<time>Follow up {new Date(lead.next_follow_up_at).toLocaleString("en-ZA")}</time>}<div>{lead.contact_method==="whatsapp"&&lead.contact_value&&<a href={whatsappUrl(lead,item)} target="_blank" rel="noreferrer">WhatsApp ↗</a>}<select value={lead.stage} onChange={event=>void changeLead(lead,event.target.value)}>{leadStages.map(value=><option value={value} key={value}>{listingLabel(value)}</option>)}</select></div></article>})}</section>)}</div></>}
+    <p className="sales-disclaimer">Facebook catalogue, eBay and Takealot API publication require connected seller credentials. Gumtree currently uses its official seller form; Bob Shop can use a product feed or assisted form. The desk never reports an advert as live until its URL is recorded.</p>
+  </section>
 }
