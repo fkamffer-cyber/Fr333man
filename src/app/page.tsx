@@ -26,7 +26,7 @@ type View =
   | "Membership"
   | "Studio"
   | "Invites"
-  | "My sales"
+  | "My Shop"
   | "Administration"
   | "My page";
 type Modal =
@@ -49,7 +49,7 @@ const views: View[] = [
   "Membership",
   "Studio",
   "Invites",
-  "My sales",
+  "My Shop",
   "Administration",
   "My page",
 ];
@@ -145,9 +145,10 @@ export default function Home() {
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("view");
     // URL state is read once after hydration so public profile links open the requested workspace.
-    if (requested && views.includes(requested as View)) {
+    const compatibleView = requested === "My sales" ? "My Shop" : requested;
+    if (compatibleView && views.includes(compatibleView as View)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setView(requested as View);
+      setView(compatibleView as View);
     }
   }, []);
   useEffect(() => {
@@ -351,7 +352,7 @@ export default function Home() {
       {view === "Membership" && <MembershipDesk show={show} />}
       {view === "Studio" && <StudioView onModal={setModal} show={show} />}
       {view === "Invites" && <InviteDesk show={show} />}
-      {view === "My sales" && <SalesDesk show={show} />}
+      {view === "My Shop" && <SalesDesk show={show} />}
       {view === "Administration" && <AdminDesk show={show} />}
       {view === "My page" && (
         <MyPage

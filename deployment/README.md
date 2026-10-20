@@ -23,6 +23,7 @@ After extracting the ZIP and setting the environment variables: `pnpm install --
 | `PAYSTACK_SECRET_KEY` | Server only | Approved merchant transaction initialization |
 | `PLATFORM_OWNER_EMAIL` | Server only | Bootstrap steward account email |
 | `NEXT_PUBLIC_SITE_URL` | Browser + server | Canonical origin, for example `https://fr333man.co.za` |
+| `GOOGLE_CLOUD_VISION_API_KEY` | Server only | Authenticated product-photo recognition in My Shop; restrict this key to the Cloud Vision API |
 
 Copy `.env.example` to `.env.local` for local development. In Vercel, add values in Project Settings → Environment Variables for Preview and Production; do not commit `.env.local`.
 
