@@ -3,6 +3,7 @@ import type {Person,Product} from '@/app/platform-data';
 
 type ProfileRow={user_id:string;avatar_name:string;display_name:string|null;region:string;bio:string;avatar_url:string|null;banner_url:string|null;skills:string[];trust_status:string};
 type ProductRow={id:string;slug:string;name:string;description:string;category:string;condition:string;price_amount:number;currency:string;stock:number;membership_eligible:boolean;owner_id:string;product_images?:Array<{storage_path:string;alt_text:string;display_order:number}>};
+export type PublicShop={id:string;slug:string;name:string;description:string;region:string;fulfilmentNote:string;returnsNote:string;owner:{name:string;handle:string;userId:string};products:Product[]};
 
 const initials=(name:string)=>name.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase();
 const price=(amount:number,currency:string)=>new Intl.NumberFormat('en-ZA',{style:'currency',currency}).format(amount/100);
@@ -20,4 +21,9 @@ export async function findPublicProduct(idOrSlug:string):Promise<(Product&{regio
 
 export async function productsForPerson(userId:string):Promise<Product[]>{
   try{const client=publicSupabase();const {data,error}=await client.from('products').select('id,slug,name,description,category,condition,price_amount,currency,stock,membership_eligible,owner_id,product_images(storage_path,alt_text,display_order)').eq('owner_id',userId).eq('status','published').eq('compliance_status','permitted').order('created_at',{ascending:false});if(error)return[];const {data:profile}=await client.from('profiles').select('avatar_name,display_name').eq('user_id',userId).maybeSingle();if(!profile)return[];return((data??[]) as ProductRow[]).map(row=>({id:row.id,slug:row.slug,name:row.name,description:row.description,category:row.category,condition:row.condition,stock:row.stock,membershipEligible:row.membership_eligible,checkoutEnabled:false,price:price(row.price_amount,row.currency),mark:mark(row.name),owner:profile.display_name||profile.avatar_name,ownerHandle:`@${profile.avatar_name}`,images:images(client,row)}))}catch{return[]}
+}
+
+export async function findPublicShop(slug:string):Promise<PublicShop|null>{
+  if(!/^[a-z0-9-]{3,60}$/i.test(slug))return null;
+  try{const client=publicSupabase();const {data:shop,error}=await client.from('shops').select('id,owner_id,slug,name,description,region,fulfilment_note,returns_note').eq('slug',slug).eq('status','active').maybeSingle();if(error||!shop)return null;const {data:profile}=await client.from('profiles').select('avatar_name,display_name').eq('user_id',shop.owner_id).eq('is_public',true).eq('trust_status','approved').maybeSingle();if(!profile)return null;const shopProducts=await productsForPerson(shop.owner_id);return{id:shop.id,slug:shop.slug,name:shop.name,description:shop.description,region:shop.region,fulfilmentNote:shop.fulfilment_note,returnsNote:shop.returns_note,owner:{name:profile.display_name||profile.avatar_name,handle:`@${profile.avatar_name}`,userId:shop.owner_id},products:shopProducts}}catch{return null}
 }

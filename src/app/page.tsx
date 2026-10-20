@@ -40,6 +40,7 @@ type Modal =
   | "vault"
   | "scan";
 type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;banner_url?:string|null};
+type FeedRecord={id:number;title:string;data:Record<string,unknown>;created_at:string;author:{avatar_name:string;display_name:string|null;region:string}|null};
 const views: View[] = [
   "Feed",
   "People",
@@ -82,6 +83,7 @@ export default function Home() {
       });
       const result = await response.json() as {error?:string};
       if (!response.ok) throw new Error(result.error || "Save failed");
+      if(entity==="post")window.dispatchEvent(new Event("fr333man-feed-refresh"));
       show(marketplaceProduct ? `${title} submitted for marketplace review` : `${title} saved to the community`);
       setModal("");
       return true;
@@ -322,10 +324,7 @@ export default function Home() {
         <Feed
           onView={setView}
           onModal={setModal}
-          onPromote={promote}
           promoted={promoted}
-          onJoin={join}
-          joined={joined}
         />
       )}
       {view === "People" && (
@@ -380,18 +379,14 @@ export default function Home() {
 function Feed({
   onView,
   onModal,
-  onPromote,
   promoted,
-  onJoin,
-  joined,
 }: {
   onView: (v: View) => void;
   onModal: (m: Modal) => void;
-  onPromote: (p: Product) => void;
   promoted: string[];
-  onJoin: (p: Project) => void;
-  joined: string[];
 }) {
+  const [feedPosts,setFeedPosts]=useState<FeedRecord[]>([]);
+  useEffect(()=>{const controller=new AbortController();const refresh=()=>void fetch("/api/community?entity=post",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const result=await response.json() as {records?:FeedRecord[]};setFeedPosts(result.records??[])}).catch(()=>undefined);refresh();window.addEventListener("fr333man-feed-refresh",refresh);return()=>{controller.abort();window.removeEventListener("fr333man-feed-refresh",refresh)}},[]);
   return (
     <div className="workspace">
       <aside className="left-rail">
@@ -453,52 +448,7 @@ function Feed({
             ◉ Live
           </button>
         </div>
-        <article className="post">
-          <PostHead person={people[1]} time="18 min" />
-          <p>
-            We mapped three collection points for the clean-water pilot. We
-            still need a logistics lead and two testing volunteers for Saturday.
-          </p>
-          <div className="project-inline">
-            <span>ACTIVE PROJECT · 68% FUNDED</span>
-            <h3>Neighbourhood Water Resilience</h3>
-            <div className="progress">
-              <i style={{ width: "68%" }}></i>
-            </div>
-            <button onClick={() => onJoin(projects[0])}>
-              {joined.includes(projects[0].id)
-                ? "Joined ✓"
-                : "Join this project"}
-            </button>
-          </div>
-          <PostActions postId="water-pilot" show={() => {}} />
-        </article>
-        <article className="post visual-post">
-          <PostHead person={people[0]} time="1 hr" />
-          <p>
-            The physical hub is the doorway. Scan a question, sit down, then
-            continue the conversation with people here.
-          </p>
-          <img
-            src="/freeman-market-concept.jpg"
-            alt="FR333MAN outdoor conversation and product hub"
-          />
-          <PostActions postId="physical-hub" show={() => {}} />
-        </article>
-        <article className="post">
-          <PostHead person={people[2]} time="3 hrs" />
-          <p>
-            I am promoting Kabelo’s solar workshop passes this week.
-            Cross-promotion works when the product and the purpose are both
-            clear.
-          </p>
-          <ProductCard
-            product={products[2]}
-            promoted={promoted.includes(products[2].id)}
-            onPromote={() => onPromote(products[2])}
-          />
-          <PostActions postId="solar-workshop" show={() => {}} />
-        </article>
+        {feedPosts.length?feedPosts.map(post=><CommunityFeedPost record={post} key={post.id}/>):<div className="empty-work feed-empty"><b>No People posts yet.</b><span>Verified member welcomes and member-created posts will appear here from the shared Feed.</span></div>}
       </section>
       <aside className="right-rail">
         <section className="live-now">
@@ -562,6 +512,16 @@ function Feed({
       </aside>
     </div>
   );
+}
+
+function CommunityFeedPost({record}:{record:FeedRecord}){
+  const welcome=record.data.kind==="member_welcome";const handle=record.author?.avatar_name?`@${record.author.avatar_name}`:String(record.data.handle||"@people");const name=record.author?.display_name||String(record.data.memberName||handle.replace(/^@/,""));const initials=name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const posted=new Intl.DateTimeFormat("en-ZA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(record.created_at));
+  return <article className={`post ${welcome?"welcome-post":""}`}>
+    <header className="post-head"><a className="avatar" href={`/people/${handle.replace(/^@/,"")}`}>{initials}</a><span><a href={`/people/${handle.replace(/^@/,"")}`}>{name}</a><small>{handle} · {posted}</small></span>{welcome&&<b className="people-badge">NEW PEOPLE MEMBER</b>}</header>
+    <h2>{record.title}</h2><p>{String(record.data.body||"")}</p>
+    {welcome&&<nav className="welcome-links" aria-label="New member links"><a href={String(record.data.bioUrl||`/people/${handle.replace(/^@/,"")}#about`)}>Read bio</a><a href={String(record.data.profileUrl||`/people/${handle.replace(/^@/,"")}`)}>Open People page</a><a className="primary" href={String(record.data.shopUrl||`/shops/${handle.replace(/^@/,"")}`)}>Visit shop</a></nav>}
+    <PostActions postId={`community-${record.id}`} show={()=>{}} />
+  </article>
 }
 
 function PeopleView({
@@ -1331,26 +1291,6 @@ function PlatformModal({
   );
 }
 
-function PostHead({ person, time }: { person: Person; time: string }) {
-  return (
-    <header className="post-head">
-      <a
-        href={`/people/${person.handle.slice(1)}`}
-        className="profile-orb tiny"
-        style={{ background: person.color }}
-      >
-        {person.initials}
-      </a>
-      <span>
-        <a href={`/people/${person.handle.slice(1)}`}>{person.name}</a>
-        <small>
-          {person.handle} · {time}
-        </small>
-      </span>
-      <button>•••</button>
-    </header>
-  );
-}
 type FeedComment = {
   id: string;
   author: string;

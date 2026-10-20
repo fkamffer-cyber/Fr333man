@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { people, products } from "./platform-data";
 import { authenticatedHeaders } from "./lib/supabase-browser";
 
 type StockItem = {
@@ -11,13 +10,8 @@ type StockItem = {
   stock: number;
   status: "active" | "review" | "archived";
 };
-const initialStock: StockItem[] = products.map((product, index) => ({
-  id: product.id,
-  name: product.name,
-  sku: `FR-${String(index + 1).padStart(4, "0")}`,
-  stock: [12, 31, 8, 44][index],
-  status: product.id === "cdswater" ? "review" : "active",
-}));
+type MemberRecord = {user_id:string;avatar_name:string;display_name:string|null;region:string;member_type:string;trust_status:string;platform_role:string;witness_handle:string|null;witness_selfie_ready:boolean;witness_selfie_url:string|null;onboarding_status:string|null;submitted_at:string|null;verified_at:string|null};
+const initialStock: StockItem[] = [];
 
 export default function AdminDesk({
   show,
@@ -26,6 +20,8 @@ export default function AdminDesk({
 }) {
   const [tab, setTab] = useState<"People" | "Inventory">("People");
   const [stock, setStock] = useState(initialStock);
+  const [members,setMembers]=useState<MemberRecord[]>([]);
+  const [adminNotice,setAdminNotice]=useState("");
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState(false);
   useEffect(() => {
@@ -36,6 +32,7 @@ export default function AdminDesk({
         return (await response.json()) as {
           records: { title: string; data: Record<string, unknown> }[];
           products?: {id:string;name:string;sku:string|null;stock:number;compliance_status:string;status:string}[];
+          members?: MemberRecord[];
         };
       })
       .then((result) => {
@@ -63,8 +60,9 @@ export default function AdminDesk({
         }
         setStatuses(nextStatuses);
         setStock(nextStock);
+        setMembers(result.members??[]);
       })
-      .catch(() => undefined);
+      .catch(() => setAdminNotice("Connect Supabase and sign in as a steward to load real People records."));
     return () => {
       active = false;
     };
@@ -90,6 +88,7 @@ export default function AdminDesk({
   const memberAction = async (handle: string, next: string) => {
     if (await save("member-status", handle, { status: next })) {
       setStatuses((value) => ({ ...value, [handle]: next }));
+      setMembers(current=>current.map(member=>`@${member.avatar_name}`===handle?{...member,trust_status:next==="APPROVED"?"approved":next==="SUSPENDED"?"suspended":"pending_review",...(next==="APPROVED"?{onboarding_status:"approved",verified_at:new Date().toISOString()}: {})}:member));
     }
   };
   const adjust = async (item: StockItem, delta: number) => {
@@ -161,7 +160,7 @@ export default function AdminDesk({
               <p>MEMBER MANAGEMENT</p>
               <h2>People and permissions</h2>
             </div>
-            <span>{people.length} records</span>
+            <span>{members.length} real records</span>
           </div>
           <div className="admin-table">
             <div className="admin-row admin-header">
@@ -170,41 +169,38 @@ export default function AdminDesk({
               <span>Access role</span>
               <span>Controls</span>
             </div>
-            {people.map((person, index) => {
-              const status = statuses[person.handle] || person.status;
+            {members.length?members.map((person) => {
+              const handle=`@${person.avatar_name}`;const status = statuses[handle] || person.trust_status.replaceAll("_"," ").toUpperCase();
               return (
-                <div className="admin-row" key={person.handle}>
+                <div className="admin-row" key={person.user_id}>
                   <span>
-                    <b>{person.name}</b>
+                    <b>{person.display_name||person.avatar_name}</b>
                     <small>
-                      {person.handle} · {person.region}
+                      {handle} · {person.region}
                     </small>
+                    <small>{person.witness_selfie_ready?`Joint selfie ready · witness ${person.witness_handle}`:"Joint selfie missing"}</small>
                   </span>
                   <span className="state">{status}</span>
-                  <span>
-                    {index === 0
-                      ? "Platform steward"
-                      : index < 3
-                        ? "Project member"
-                        : "Profile member"}
-                  </span>
+                  <span>{person.platform_role.replaceAll("_"," ")}</span>
                   <span className="row-actions">
+                    {person.witness_selfie_url&&<a href={person.witness_selfie_url} target="_blank" rel="noreferrer">Review selfie ↗</a>}
                     <button
+                      disabled={!person.witness_selfie_ready||person.trust_status==="approved"}
                       onClick={() =>
-                        void memberAction(person.handle, "APPROVED")
+                        void memberAction(handle, "APPROVED")
                       }
                     >
-                      Approve
+                      Verify &amp; welcome
                     </button>
                     <button
-                      onClick={() => void memberAction(person.handle, "REVIEW")}
+                      onClick={() => void memberAction(handle, "REVIEW")}
                     >
                       Review
                     </button>
                     <button
                       className="danger"
                       onClick={() =>
-                        void memberAction(person.handle, "SUSPENDED")
+                        void memberAction(handle, "SUSPENDED")
                       }
                     >
                       Suspend
@@ -212,7 +208,7 @@ export default function AdminDesk({
                   </span>
                 </div>
               );
-            })}
+            }):<div className="empty-work"><b>No People records loaded.</b><span>{adminNotice||"New onboarding submissions will appear here for joint-selfie review."}</span></div>}
           </div>
         </article>
       ) : (

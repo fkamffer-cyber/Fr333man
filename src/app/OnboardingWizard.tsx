@@ -122,16 +122,23 @@ export default function OnboardingWizard() {
       const session = supabase ? await supabase.auth.getSession() : null;
       const token = session?.data.session?.access_token;
       if (!token) throw new Error("Sign in is required before submission");
-      for (const file of [identityFile, witnessFile]) {
+      let identityDocumentPath = "";
+      let witnessSelfiePath = "";
+      for (const [purpose, file] of [["identity", identityFile], ["witness-selfie", witnessFile]] as const) {
         if (!file) throw new Error("Both verification files are required");
         const form = new FormData();
         form.set("file", file);
+        form.set("purpose", purpose);
         const upload = await fetch("/api/upload", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
-        if (!upload.ok) throw new Error("Verification upload failed");
+        const uploaded = (await upload.json()) as { key?: string; error?: string };
+        if (!upload.ok || !uploaded.key)
+          throw new Error(uploaded.error || "Verification upload failed");
+        if (purpose === "identity") identityDocumentPath = uploaded.key;
+        else witnessSelfiePath = uploaded.key;
       }
       const response = await fetch("/api/community", {
         method: "POST",
@@ -147,6 +154,8 @@ export default function OnboardingWizard() {
             status: "pending_identity_review",
             submittedAt: new Date().toISOString(),
             inviteId,
+            identityDocumentPath,
+            witnessSelfiePath,
           },
         }),
       });
@@ -350,9 +359,14 @@ export default function OnboardingWizard() {
                 />
               </label>
               <label>
-                Consented witness selfie
+                Joint selfie: new member + existing member
                 <input type="file" accept="image/jpeg,image/png,image/webp" required onChange={(event) => setWitnessFile(event.target.files?.[0] || null)} />
               </label>
+              <small className="verification-guidance">
+                Both people must be clearly visible in the same photo. This
+                image stays private and is used only for member-witness
+                verification.
+              </small>
               <label className="check">
                 <input
                   type="checkbox"
