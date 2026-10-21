@@ -24,6 +24,12 @@ After extracting the ZIP and setting the environment variables: `pnpm install --
 | `PLATFORM_OWNER_EMAIL` | Server only | Bootstrap steward account email |
 | `NEXT_PUBLIC_SITE_URL` | Browser + server | Canonical origin, for example `https://fr333man.co.za` |
 | `GOOGLE_CLOUD_VISION_API_KEY` | Server only | Authenticated product-photo recognition in My Shop; restrict this key to the Cloud Vision API |
+| `META_CATALOG_ID` | Server only | FR333MAN Commerce Manager catalogue identifier for future API publishing |
+| `META_ACCESS_TOKEN` | Server only | Meta server token; store only after app review and restrict permissions |
+| `EBAY_CLIENT_ID` | Server only | eBay production application client ID |
+| `EBAY_CLIENT_SECRET` | Server only | eBay production application secret |
+| `EBAY_RU_NAME` | Server only | eBay OAuth redirect/RuName value |
+| `TAKEALOT_API_KEY` | Server only | API key for the approved FR333MAN Takealot seller account |
 
 Copy `.env.example` to `.env.local` for local development. In Vercel, add values in Project Settings → Environment Variables for Preview and Production; do not commit `.env.local`.
 
