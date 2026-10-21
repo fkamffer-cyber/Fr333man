@@ -346,7 +346,7 @@ export default function Home() {
             setSelectedProduct(product);
             setModal("checkout");
           }}
-          onAdd={() => setModal("product")}
+          onAdd={() => {setView("My Shop");window.setTimeout(()=>window.dispatchEvent(new Event("fr333man-open-product-wizard")),0)}}
         />
       )}
       {view === "Membership" && <MembershipDesk show={show} />}
@@ -683,7 +683,7 @@ function MarketView({
   const [localProducts,setLocalProducts]=useState<Product[]>([]);
   const [localDetail,setLocalDetail]=useState<Product|null>(null);
   useEffect(() => { const controller=new AbortController(); void fetch("/api/marketplace",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};setRemoteProducts(data.products??[])}).catch(()=>undefined);return()=>controller.abort(); }, []);
-  useEffect(()=>{const refresh=()=>setLocalProducts(loadLocalProducts());queueMicrotask(refresh);window.addEventListener(localProductsEvent,refresh);return()=>window.removeEventListener(localProductsEvent,refresh)},[]);
+  useEffect(()=>{const refresh=()=>setLocalProducts(loadLocalProducts().filter(product=>(product as Product&{visibility?:string}).visibility==="community"));queueMicrotask(refresh);window.addEventListener(localProductsEvent,refresh);return()=>window.removeEventListener(localProductsEvent,refresh)},[]);
   const availableProducts = Array.from(new Map([...localProducts,...remoteProducts].map(product=>[product.id,product])).values());
   const categories = ["All", ...Array.from(new Set(availableProducts.map(product=>product.category)))];
   const list = availableProducts.filter(
