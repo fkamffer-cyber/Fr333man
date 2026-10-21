@@ -20,6 +20,7 @@ type Draft = {
   avatar: string;
   region: string;
   memberType: string;
+  email: string;
   phone: string;
   answers: string[];
   witness: string;
@@ -33,6 +34,7 @@ const initial: Draft = {
   avatar: "fr333man",
   region: "Randburg",
   memberType: "profile",
+  email: "",
   phone: "",
   answers: Array(10).fill(""),
   witness: "",
@@ -44,6 +46,9 @@ const initial: Draft = {
 };
 
 export default function OnboardingWizard() {
+  const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
+  const appleEnabled = process.env.NEXT_PUBLIC_APPLE_AUTH_ENABLED === "true";
+  const phoneEnabled = process.env.NEXT_PUBLIC_PHONE_AUTH_ENABLED === "true";
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Draft>(initial);
   const [notice, setNotice] = useState("");
@@ -85,6 +90,23 @@ export default function OnboardingWizard() {
       options: { redirectTo: `${window.location.origin}/onboarding` },
     });
     if (error) setNotice(error.message);
+  };
+  const sendEmailLink = async () => {
+    const supabase = getSupabaseBrowser();
+    if (!supabase) {
+      setNotice("Account connection is temporarily unavailable.");
+      return;
+    }
+    const email = draft.email.trim();
+    if (!email) {
+      setNotice("Enter your email address first.");
+      return;
+    }
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/onboarding` },
+    });
+    setNotice(error ? error.message : "Secure sign-in link sent. Open it on this device to continue.");
   };
   const sendOtp = async () => {
     const supabase = getSupabaseBrowser();
@@ -205,15 +227,30 @@ export default function OnboardingWizard() {
               Use an existing account for easier sign-in. This does not replace
               identity, liveness or member-witness verification.
             </p>
-            <div className="entry-options">
-              <button onClick={() => void social("google")}>
+            {(googleEnabled || appleEnabled) && <div className="entry-options">
+              {googleEnabled && <button onClick={() => void social("google")}>
                 G&nbsp; Continue with Google
-              </button>
-              <button onClick={() => void social("apple")}>
+              </button>}
+              {appleEnabled && <button onClick={() => void social("apple")}>
                 ● Continue with Apple
+              </button>}
+            </div>}
+            <div className="phone-auth">
+              <label>
+                Email address
+                <input
+                  value={draft.email}
+                  onChange={(e) => update("email", e.target.value)}
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                />
+              </label>
+              <button onClick={() => void sendEmailLink()}>
+                Email me a secure sign-in link
               </button>
             </div>
-            <div className="phone-auth">
+            {phoneEnabled && <div className="phone-auth">
               <label>
                 Mobile number
                 <input
@@ -238,7 +275,7 @@ export default function OnboardingWizard() {
                   <button onClick={() => void verifyOtp()}>Verify code</button>
                 </>
               )}
-            </div>
+            </div>}
             <button className="text-button" onClick={() => setStep(2)}>
               Continue and connect later →
             </button>

@@ -23,6 +23,9 @@ After extracting the ZIP and setting the environment variables: `pnpm install --
 | `PAYSTACK_SECRET_KEY` | Server only | Approved merchant transaction initialization |
 | `PLATFORM_OWNER_EMAIL` | Server only | Bootstrap steward account email |
 | `NEXT_PUBLIC_SITE_URL` | Browser + server | Canonical origin, for example `https://fr333man.co.za` |
+| `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | Browser | Set to `true` only after the Google provider is configured in Supabase |
+| `NEXT_PUBLIC_APPLE_AUTH_ENABLED` | Browser | Set to `true` only after the Apple provider is configured in Supabase |
+| `NEXT_PUBLIC_PHONE_AUTH_ENABLED` | Browser | Set to `true` only after the phone provider and SMS service are configured in Supabase |
 | `GOOGLE_CLOUD_VISION_API_KEY` | Server only | Authenticated product-photo recognition in My Shop; restrict this key to the Cloud Vision API |
 | `META_CATALOG_ID` | Server only | FR333MAN Commerce Manager catalogue identifier for future API publishing |
 | `META_ACCESS_TOKEN` | Server only | Meta server token; store only after app review and restrict permissions |
