@@ -14,9 +14,9 @@ import SalesDesk from "./SalesDesk";
 import AdminDesk from "./AdminDesk";
 import InviteDesk from "./InviteDesk";
 import MembershipDesk from "./MembershipDesk";
-import { authenticatedHeaders } from "./lib/supabase-browser";
+import { authenticatedHeaders, getSupabaseBrowser } from "./lib/supabase-browser";
 import { marketplaceCategories } from "@/lib/marketplace-taxonomy";
-import { loadLocalProducts, localProductsEvent, saveLocalProduct } from "./lib/local-products";
+import { saveLocalProduct } from "./lib/local-products";
 
 type View =
   | "Feed"
@@ -41,6 +41,7 @@ type Modal =
   | "scan";
 type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;banner_url?:string|null};
 type FeedRecord={id:number;title:string;data:Record<string,unknown>;created_at:string;author:{avatar_name:string;display_name:string|null;region:string}|null};
+type AuthState="checking"|"signed_in"|"signed_out";
 const views: View[] = [
   "Feed",
   "People",
@@ -60,7 +61,9 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [joined, setJoined] = useState<string[]>(["soil-circles"]);
-  const [promoted, setPromoted] = useState<string[]>(["npk432"]);
+  const [promoted, setPromoted] = useState<string[]>([]);
+  const [authState,setAuthState]=useState<AuthState>("checking");
+  const [ownProfile,setOwnProfile]=useState<OwnProfile|null>(null);
   const [saving, setSaving] = useState(false);
   const [scanSeconds, setScanSeconds] = useState(10);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -108,21 +111,22 @@ export default function Home() {
       role: "contributor",
     });
   };
-  const promote = (product: Product) => {
+  const promote = async (product: Product) => {
+    if(authState!=="signed_in"){
+      show("Sign in to add products to your People page");
+      window.location.assign("/onboarding");
+      return;
+    }
     const removing = promoted.includes(product.id);
-    setPromoted((v) =>
-      removing ? v.filter((id) => id !== product.id) : [...v, product.id],
-    );
-    void save(
+    const saved=await save(
       "promotion",
       `${removing ? "Removed" : "Promoting"} ${product.name}`,
       { productId: product.id, active: !removing },
     );
-    show(
-      removing
-        ? "Removed from your page"
-        : `${product.name} is now promoted on your page`,
-    );
+    if(saved){
+      setPromoted((v) => removing ? v.filter((id) => id !== product.id) : [...v, product.id]);
+      show(removing ? "Removed from your page" : `${product.name} is now promoted on your page`);
+    }
   };
   const uploadVault = async (e: FormEvent<HTMLElement>) => {
     const input = e.target as HTMLInputElement;
@@ -151,6 +155,38 @@ export default function Home() {
       setView(compatibleView as View);
     }
   }, []);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (view === "Feed") url.searchParams.delete("view");
+    else url.searchParams.set("view", view);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [view]);
+  useEffect(()=>{
+    const supabase=getSupabaseBrowser();
+    if(!supabase){queueMicrotask(()=>setAuthState("signed_out"));return;}
+    let active=true;
+    const load=async(accessToken?:string)=>{
+      if(!active)return;
+      if(!accessToken){setAuthState("signed_out");setOwnProfile(null);setPromoted([]);return;}
+      setAuthState("signed_in");
+      const headers={Authorization:`Bearer ${accessToken}`};
+      const [profileResponse,promotionResponse]=await Promise.all([
+        fetch("/api/people?mine=true",{headers}),
+        fetch("/api/community?entity=promotion&mine=true",{headers}),
+      ]);
+      if(!active)return;
+      if(profileResponse.ok){const result=await profileResponse.json() as {profile?:OwnProfile};setOwnProfile(result.profile??null)}
+      if(promotionResponse.ok){
+        const result=await promotionResponse.json() as {records?:FeedRecord[]};
+        const latest=new Map<string,boolean>();
+        for(const record of result.records??[]){const id=String(record.data.productId||"");if(id&&!latest.has(id))latest.set(id,record.data.active===true)}
+        setPromoted([...latest].filter(([,enabled])=>enabled).map(([id])=>id));
+      }
+    };
+    void supabase.auth.getSession().then(({data})=>load(data.session?.access_token));
+    const {data:listener}=supabase.auth.onAuthStateChange((_event,session)=>void load(session?.access_token));
+    return()=>{active=false;listener.subscription.unsubscribe()};
+  },[]);
   useEffect(() => {
     if (modal !== "scan") return;
     const timer = window.setInterval(
@@ -304,9 +340,9 @@ export default function Home() {
               placeholder="Search people, projects, products"
             />
           </label>
-          <button className="avatar-button" onClick={() => setView("My page")}>
-            <span>FK</span>
-            <b>Francois</b>
+          <button className="avatar-button" onClick={() => authState==="signed_in"?setView("My page"):window.location.assign("/onboarding")}>
+            <span>{authState==="signed_in"?(ownProfile?.display_name||ownProfile?.avatar_name||"ME").split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase():"↪"}</span>
+            <b>{authState==="signed_in"?ownProfile?.display_name||ownProfile?.avatar_name||"My page":"Sign in"}</b>
           </button>
         </div>
       </header>
@@ -326,6 +362,8 @@ export default function Home() {
           onView={setView}
           onModal={setModal}
           promoted={promoted}
+          authState={authState}
+          profile={ownProfile}
         />
       )}
       {view === "People" && (
@@ -359,6 +397,9 @@ export default function Home() {
           promoted={promoted}
           onModal={setModal}
           setView={setView}
+          authState={authState}
+          profile={ownProfile}
+          onPromote={promote}
         />
       )}
       {modal && (
@@ -381,22 +422,30 @@ function Feed({
   onView,
   onModal,
   promoted,
+  authState,
+  profile,
 }: {
   onView: (v: View) => void;
   onModal: (m: Modal) => void;
   promoted: string[];
+  authState:AuthState;
+  profile:OwnProfile|null;
 }) {
   const [feedPosts,setFeedPosts]=useState<FeedRecord[]>([]);
+  const signedIn=authState==="signed_in";
+  const profileName=profile?.display_name||profile?.avatar_name||"Not signed in";
+  const profileInitials=signedIn?profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase():"↪";
+  const openComposer=()=>signedIn?onModal("post"):window.location.assign("/onboarding");
   useEffect(()=>{const controller=new AbortController();const refresh=()=>void fetch("/api/community?entity=post",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const result=await response.json() as {records?:FeedRecord[]};setFeedPosts(result.records??[])}).catch(()=>undefined);refresh();window.addEventListener("fr333man-feed-refresh",refresh);return()=>{controller.abort();window.removeEventListener("fr333man-feed-refresh",refresh)}},[]);
   return (
     <div className="workspace">
       <aside className="left-rail">
         <section className="identity-card">
           <div className="mini-cover"></div>
-          <div className="profile-orb">FK</div>
-          <h2>Francois Kamffer</h2>
-          <p>@fr333man · Randburg</p>
-          <span className="people-badge">PEOPLE · LIVENESS CHECKED</span>
+          <div className="profile-orb">{profileInitials}</div>
+          <h2>{profileName}</h2>
+          <p>{signedIn?`@${profile?.avatar_name||"people"} · ${profile?.region||"Randburg"}`:"Connect your account to publish and manage your page"}</p>
+          <span className="people-badge">{signedIn?`PEOPLE · ${(profile?.trust_status||"PENDING REVIEW").replaceAll("_"," ").toUpperCase()}`:"ACCOUNT REQUIRED"}</span>
           <dl>
             <div>
               <dt>Membership</dt>
@@ -411,7 +460,7 @@ function Feed({
               <dd>{promoted.length}</dd>
             </div>
           </dl>
-          <button onClick={() => onView("My page")}>Open my page</button>
+          <button onClick={() => signedIn?onView("My page"):window.location.assign("/onboarding")}>{signedIn?"Open my page":"Sign in or create account"}</button>
         </section>
         <section className="principles">
           <p>OUR COMMON GROUND</p>
@@ -433,14 +482,14 @@ function Feed({
             Would you believe what you believe if you questioned those you
             believe?
           </h1>
-          <button onClick={() => onModal("post")}>
-            Share your answer <b>→</b>
+          <button onClick={openComposer}>
+            {signedIn?"Share your answer":"Sign in to answer"} <b>→</b>
           </button>
         </div>
         <div className="composer">
-          <div className="profile-orb small">FK</div>
-          <button onClick={() => onModal("post")}>
-            Share a question, idea or practical build…
+          <div className="profile-orb small">{profileInitials}</div>
+          <button onClick={openComposer}>
+            {signedIn?"Share a question, idea or practical build…":"Sign in to publish to the Feed"}
           </button>
           <button
             aria-label="Start a live stream"
@@ -680,11 +729,8 @@ function MarketView({
 }) {
   const [category, setCategory] = useState("All");
   const [remoteProducts, setRemoteProducts] = useState<Product[]>([]);
-  const [localProducts,setLocalProducts]=useState<Product[]>([]);
-  const [localDetail,setLocalDetail]=useState<Product|null>(null);
-  useEffect(() => { const controller=new AbortController(); void fetch("/api/marketplace",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};setRemoteProducts(data.products??[])}).catch(()=>undefined);return()=>controller.abort(); }, []);
-  useEffect(()=>{const refresh=()=>setLocalProducts(loadLocalProducts().filter(product=>(product as Product&{visibility?:string}).visibility==="community"));queueMicrotask(refresh);window.addEventListener(localProductsEvent,refresh);return()=>window.removeEventListener(localProductsEvent,refresh)},[]);
-  const availableProducts = Array.from(new Map([...localProducts,...remoteProducts].map(product=>[product.id,product])).values());
+  useEffect(() => { let active=true;const refresh=()=>{void fetch("/api/marketplace").then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {products?:Product[]};if(active)setRemoteProducts(data.products??[])}).catch(()=>undefined)};queueMicrotask(refresh);window.addEventListener("fr333man-marketplace-refresh",refresh);return()=>{active=false;window.removeEventListener("fr333man-marketplace-refresh",refresh)} }, []);
+  const availableProducts = remoteProducts;
   const categories = ["All", ...Array.from(new Set(availableProducts.map(product=>product.category)))];
   const list = availableProducts.filter(
     (p) => category === "All" || p.category === category,
@@ -716,7 +762,7 @@ function MarketView({
         ))}
       </div>
       <div className="market-grid">
-        {!list.length&&<div className="empty marketplace-empty"><b>No saved marketplace products yet.</b><span>List a product to save a draft on this device. Shared products will appear here once the live database is connected.</span><button className="primary" onClick={onAdd}>+ List a product</button></div>}
+        {!list.length&&<div className="empty marketplace-empty"><b>No published products yet.</b><span>Products appear here only after their owner publishes them from My Shop → Inventory.</span><button className="primary" onClick={onAdd}>+ Add inventory item</button></div>}
         {list.map((p, index) => (
           <article className="market-card" key={p.id}>
             <div className={`product-visual product-${index % 4}`}>
@@ -734,7 +780,7 @@ function MarketView({
                 <span>Eligible products may also appear in the monthly membership catalogue</span>
               </div>
               <div className="card-actions">
-                <button className="primary" onClick={() => p.id.startsWith("local-") ? setLocalDetail(p) : p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
+                <button className="primary" onClick={() => p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
                   {p.checkoutEnabled===false ? "View product" : p.id === "cdswater"
                     ? "Review availability"
                     : "Buy or donate"}
@@ -760,7 +806,6 @@ function MarketView({
           </article>
         ))}
       </div>
-      {localDetail&&<div className="local-product-backdrop" role="presentation" onClick={()=>setLocalDetail(null)}><article className="local-product-modal" role="dialog" aria-modal="true" aria-labelledby="local-product-title" onClick={event=>event.stopPropagation()}><button className="local-product-close" aria-label="Close product details" onClick={()=>setLocalDetail(null)}>×</button><div className="local-product-visual">{localDetail.images?.[0]?.url?<img src={localDetail.images[0].url} alt={localDetail.images[0].alt}/>:<span>{localDetail.mark}</span>}</div><div className="local-product-copy"><small>LOCAL DRAFT · THIS DEVICE ONLY</small><h2 id="local-product-title">{localDetail.name}</h2><b>{localDetail.price}</b><p>{localDetail.description}</p><dl><div><dt>Category</dt><dd>{localDetail.category}</dd></div><div><dt>Condition</dt><dd>{localDetail.condition||"Not specified"}</dd></div><div><dt>Stock</dt><dd>{localDetail.stock??0}</dd></div><div><dt>Location</dt><dd>{localDetail.region||"Randburg"}</dd></div></dl><p className="local-product-note">This draft is saved only in this browser. It does not have a public product URL yet.</p><button className="primary" onClick={()=>window.location.assign("/?view=My%20sales")}>Manage in My Sales</button></div></article></div>}
       <p className="legal-note">
         Products are purchased directly from the named seller unless clearly
         marked as included in a People Membership. The seller remains
@@ -848,14 +893,23 @@ function MyPage({
   promoted,
   onModal,
   setView,
+  authState,
+  profile,
+  onPromote,
 }: {
   promoted: string[];
   onModal: (m: Modal) => void;
   setView: (v: View) => void;
+  authState:AuthState;
+  profile:OwnProfile|null;
+  onPromote:(product:Product)=>void;
 }) {
-  const [profile,setProfile]=useState<OwnProfile|null>(null);
-  useEffect(()=>{const controller=new AbortController();void authenticatedHeaders().then(headers=>fetch("/api/people?mine=true",{headers,signal:controller.signal})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profile?:OwnProfile};setProfile(data.profile??null)}).catch(()=>undefined);return()=>controller.abort()},[]);
-  const profileName=profile?.display_name||profile?.avatar_name||"Francois Kamffer";const profileHandle=profile?.avatar_name?`@${profile.avatar_name}`:"@fr333man";const profileInitials=profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const profileSkills=profile?.skills?.length?profile.skills:["Water","Soil biology","Research","Broadcasting"];
+  const [marketProducts,setMarketProducts]=useState<Product[]>([]);
+  const [ownProducts,setOwnProducts]=useState<Product[]>([]);
+  useEffect(()=>{const controller=new AbortController();const load=async()=>{const headers=authState==="signed_in"?await authenticatedHeaders():{};const [marketResponse,ownResponse]=await Promise.all([fetch("/api/marketplace",{signal:controller.signal}),authState==="signed_in"?fetch("/api/marketplace?mine=true",{headers,signal:controller.signal}):Promise.resolve(null)]);if(marketResponse.ok){const data=await marketResponse.json() as {products?:Product[]};setMarketProducts(data.products??[])}if(ownResponse?.ok){const data=await ownResponse.json() as {products?:Product[]};setOwnProducts((data.products??[]).filter(product=>product.status==="published"))}};void load().catch(()=>undefined);return()=>controller.abort()},[authState]);
+  if(authState!=="signed_in")return <section className="page-shell"><header className="page-title"><div><p>MY PEOPLE PAGE</p><h1>{authState==="checking"?"Checking your account…":"Sign in to open your page"}</h1><span>Your profile, shop products and promoted products are loaded from your authenticated account—not from sample data.</span></div>{authState==="signed_out"&&<a className="primary" href="/onboarding">Sign in or create account</a>}</header></section>;
+  const profileName=profile?.display_name||profile?.avatar_name||"People member";const profileHandle=profile?.avatar_name?`@${profile.avatar_name}`:"@people";const profileInitials=profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const profileSkills=profile?.skills?.length?profile.skills:[];
+  const promotedProducts=marketProducts.filter(product=>promoted.includes(product.id));
   return (
     <section className="my-page">
       <header className="profile-header">
@@ -909,19 +963,26 @@ function MyPage({
           </article>
           <article className="profile-section">
             <div className="section-head">
+              <h2>My shop products</h2>
+              <button onClick={() => setView("My Shop")}>Manage shop</button>
+            </div>
+            {!ownProducts.length&&<div className="empty-work"><b>No published shop products yet.</b><span>Publish an Inventory item from My Shop and it will appear here and in Marketplace.</span></div>}
+            {ownProducts.map(product=><ProductCard key={product.id} product={product} promoted={promoted.includes(product.id)} onPromote={()=>void onPromote(product)}/>)}
+          </article>
+          <article className="profile-section">
+            <div className="section-head">
               <h2>Products I promote</h2>
               <button onClick={() => setView("Marketplace")}>
                 Add products
               </button>
             </div>
-            {products
-              .filter((p) => promoted.includes(p.id))
-              .map((p) => (
+            {!promotedProducts.length&&<div className="empty-work"><b>No products promoted yet.</b><span>Choose a live Marketplace product and select Promote. It will then appear here.</span></div>}
+            {promotedProducts.map((p) => (
                 <ProductCard
                   key={p.id}
                   product={p}
                   promoted
-                  onPromote={() => {}}
+                  onPromote={() => void onPromote(p)}
                 />
               ))}
           </article>

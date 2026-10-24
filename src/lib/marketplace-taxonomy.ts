@@ -1,9 +1,15 @@
-export const marketplaceCategories=[
-  'Vehicles','Property Rentals','Apparel','Classifieds','Electronics','Entertainment','Family','Free Stuff',
-  'Garden & Outdoor','Hobbies','Home Goods','Home Improvement','Home Sales','Musical Instruments','Office Supplies',
-  'Pet Supplies','Sporting Goods','Toys & Games','Business Equipment','Services','Digital Products'
+export const marketplaceCategoryGroups=[
+  {name:'Home & Garden',categories:['Tools','Furniture','Household','Garden','Appliances']},
+  {name:'Entertainment',categories:['Video Games','Books, Movies & Music']},
+  {name:'Clothing & Accessories',categories:['Bags & Luggage',"Women's clothing & shoes","Men's clothing & shoes",'Jewelry & Accessories']},
+  {name:'Family',categories:['Health & beauty','Pet Supplies','Baby & kids','Toys & Games']},
+  {name:'Electronics',categories:['Electronics & computers','Mobile phones']},
+  {name:'Hobbies',categories:['Bicycles','Arts & Crafts','Sports & Outdoors','Auto parts','Musical Instruments','Antiques & Collectibles']},
+  {name:'Classifieds',categories:['Garage Sale','Miscellaneous']},
+  {name:'Vehicles',categories:['Vehicles']}
 ] as const;
 
+export const marketplaceCategories=marketplaceCategoryGroups.flatMap(group=>group.categories);
 export type MarketplaceCategory=(typeof marketplaceCategories)[number];
 
 export const salesChannels=[

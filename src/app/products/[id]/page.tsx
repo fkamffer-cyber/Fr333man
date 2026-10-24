@@ -12,7 +12,10 @@ export default async function ProductListing({ params }: { params: Promise<{ id:
     <main className="product-listing">
       <nav><Link href="/">FR<span>333</span>MAN</Link><Link href="/?view=Marketplace">Marketplace</Link></nav>
       <article>
-        <div className="listing-visual">{product.images?.[0]?.url?<img src={product.images[0].url} alt={product.images[0].alt}/>:product.mark}</div>
+        <div className="listing-gallery">
+          <div className="listing-visual">{product.images?.[0]?.url?<img src={product.images[0].url} alt={product.images[0].alt}/>:product.mark}</div>
+          {(product.images?.length??0)>1&&<div className="listing-thumbnails">{product.images?.slice(1,10).map((image,index)=><a href={image.url} target="_blank" key={`${image.url}-${index}`}><img src={image.url} alt={image.alt}/></a>)}</div>}
+        </div>
         <section className="listing-copy">
           <small>{product.category.toUpperCase()} · PUBLIC PRODUCT LISTING</small>
           <h1>{product.name}</h1><strong>{product.price}</strong><p>{product.description}</p>

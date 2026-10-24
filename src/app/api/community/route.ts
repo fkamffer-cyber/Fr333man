@@ -16,7 +16,8 @@ export async function GET(req:Request){
       return Response.json({records:[{id:data.id,entity:'invitation',title:data.recipient_name,data:{name:data.recipient_name,message:data.personal_message,sourceUrl:data.source_url,...(data.source_metadata as object)},status:data.status}]});
     }
     const entity=url.searchParams.get('entity');if(entity&&!contentEntities.has(entity))return Response.json({error:'Unsupported record type'},{status:400});
-    const client=publicSupabase();let query=client.from('community_records').select('id,owner_id,entity,title,data,status,created_at').eq('status','active').order('created_at',{ascending:false}).limit(100);if(entity)query=query.eq('entity',entity);
+    const mine=url.searchParams.get('mine')==='true';const auth=mine?await authenticatedSupabase(req):null;if(mine&&!auth)return Response.json({error:'Sign in required'},{status:401});
+    const client=mine?serviceSupabase():publicSupabase();let query=client.from('community_records').select('id,owner_id,entity,title,data,status,created_at').eq('status','active').order('created_at',{ascending:false}).limit(100);if(entity)query=query.eq('entity',entity);if(mine&&auth)query=query.eq('owner_id',auth.user.id);
     const {data,error}=await query;if(error)throw error;const ownerIds=Array.from(new Set((data??[]).map(row=>row.owner_id)));const {data:authors}=ownerIds.length?await client.from('profiles').select('user_id,avatar_name,display_name,region').in('user_id',ownerIds):{data:[]};const authorMap=new Map((authors??[]).map(author=>[author.user_id,author]));return Response.json({records:(data??[]).map(row=>({...row,author:authorMap.get(row.owner_id)??null}))});
   }catch{return unavailable()}
 }

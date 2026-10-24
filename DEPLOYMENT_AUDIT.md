@@ -1,6 +1,6 @@
 # FR333MAN deployment audit
 
-Audit date: 2026-09-12
+Audit date: 2026-10-22
 
 Verdict: **the source package is build-ready for Vercel and schema-ready for Supabase**. Production activation still requires a Supabase project, provider credentials, migration application, merchant approval, and identity-provider/legal sign-off.
 
@@ -37,7 +37,7 @@ No package in the final dependency list requires a persistent process, local fil
 - Paystack transaction initialization at `api.paystack.co`; it is disabled until `PAYSTACK_SECRET_KEY` is supplied.
 - User-requested public website/YouTube HTML preview fetches in `/api/link-preview`; private-network addresses and redirects are rejected.
 - Google Fonts CSS and font files loaded by the browser from `fonts.googleapis.com`/`fonts.gstatic.com`.
-- Facebook Marketplace, Gumtree, Bob Shop, and eBay are outbound links only; this package does not publish or message through their APIs.
+- The shared Marketplace is Supabase-backed. The sales desk prepares channel adverts, tracks approval, live URLs, renewals and buyer follow-up. `/api/catalog/meta` supplies a Meta catalogue feed with multiple images. Personal Facebook Marketplace publication is not exposed by a supported integration; eBay, Takealot, Bob Shop and Gumtree publication still require their approved account/API or seller workflow.
 
 ## Security and configuration findings
 
