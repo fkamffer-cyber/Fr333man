@@ -1,23 +1,277 @@
-import {rejectCrossOrigin} from '@/lib/http';
-import {requireSteward} from '@/lib/supabase-server';
+import { rejectCrossOrigin } from "@/lib/http";
+import { requireSteward } from "@/lib/supabase-server";
 
-const actions=new Set(['member-status','stock-adjustment','inventory-create','inventory-archive','product-status']);
-const clean=(value:unknown,max=180)=>typeof value==='string'?value.trim().slice(0,max):'';
-const unavailable=()=>Response.json({error:'Administration storage is temporarily unavailable'},{status:503});
+const actions = new Set([
+  "member-status",
+  "stock-adjustment",
+  "inventory-create",
+  "inventory-archive",
+  "product-status",
+]);
+const clean = (value: unknown, max = 180) =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
+const unavailable = () =>
+  Response.json(
+    { error: "Administration storage is temporarily unavailable" },
+    { status: 503 },
+  );
 
-export async function GET(req:Request){
-  try{const steward=await requireSteward(req);if(!steward)return Response.json({error:'Platform steward access required'},{status:403});const [{data,error},{data:products,error:productError},{data:profiles,error:profileError},{data:submissions,error:submissionError}]=await Promise.all([steward.admin.from('admin_audit').select('id,action,target_id,detail,created_at').order('created_at',{ascending:true}).limit(1000),steward.admin.from('products').select('id,name,sku,stock,compliance_status,status').order('updated_at',{ascending:false}).limit(200),steward.admin.from('profiles').select('user_id,avatar_name,display_name,region,member_type,trust_status,platform_role,created_at').order('created_at',{ascending:false}).limit(200),steward.admin.from('onboarding_submissions').select('user_id,witness_handle,witness_selfie_path,status,submitted_at,verified_at').limit(200)]);if(error||productError||profileError||submissionError)throw error||productError||profileError||submissionError;const submissionMap=new Map((submissions??[]).map(item=>[item.user_id,item]));const members=await Promise.all((profiles??[]).map(async profile=>{const submission=submissionMap.get(profile.user_id);let witnessSelfieUrl:string|null=null;if(submission?.witness_selfie_path){const {data:signed}=await steward.admin.storage.from('private-vault').createSignedUrl(submission.witness_selfie_path,300);witnessSelfieUrl=signed?.signedUrl??null}return{...profile,witness_handle:submission?.witness_handle??null,witness_selfie_ready:Boolean(submission?.witness_selfie_path),witness_selfie_url:witnessSelfieUrl,onboarding_status:submission?.status??null,submitted_at:submission?.submitted_at??null,verified_at:submission?.verified_at??null}}));return Response.json({records:(data??[]).map(row=>({id:row.id,title:row.target_id,data:{action:row.action,...(row.detail as object)},created_at:row.created_at})),products:products??[],members})}catch{return unavailable()}
+function approvalFailure(error: { message?: string } | null) {
+  const message = error?.message || "";
+  const notFound = "People profile not found";
+  if (message.includes(notFound)) {
+    return Response.json({ error: notFound }, { status: 404 });
+  }
+  const expected = [
+    "A signed-in People steward must perform approval",
+    "People onboarding is not ready for identity review",
+    "Complete identity evidence and all consents are required before approval",
+    "Stored identity evidence is missing; the member must upload it again",
+    "The witness must still be an approved People member",
+    "A People member cannot witness their own account",
+  ];
+  const safeMessage = expected.find((item) => message.includes(item));
+  return safeMessage
+    ? Response.json({ error: safeMessage }, { status: 409 })
+    : unavailable();
 }
 
-export async function POST(req:Request){
-  const originError=rejectCrossOrigin(req);if(originError)return originError;
-  try{
-    const steward=await requireSteward(req);if(!steward)return Response.json({error:'Platform steward access required'},{status:403});const body=await req.json() as {action?:unknown;title?:unknown;data?:Record<string,unknown>};const action=clean(body.action,40);const title=clean(body.title);const detail=body.data&&typeof body.data==='object'?body.data:{};if(!actions.has(action)||!title)return Response.json({error:'Invalid administration action'},{status:400});
-    if(action==='inventory-create'){const stock=Math.max(0,Math.floor(Number(detail.stock)||0));const id=clean(detail.id,80)||crypto.randomUUID();const sku=clean(detail.sku,80);const name=clean(detail.name||title);if(!sku||!name)return Response.json({error:'Product name and SKU are required'},{status:400});const {error}=await steward.admin.from('inventory').upsert({id,owner_id:steward.user.id,sku,name,stock,compliance_status:'pending_review',status:'active'});if(error)throw error}
-    if(action==='stock-adjustment'){const productId=clean(detail.productId,80);const stock=Math.max(0,Math.floor(Number(detail.stock)||0));const {error}=await steward.admin.from('inventory').update({stock,updated_at:new Date().toISOString()}).eq('id',productId);if(error)throw error}
-    if(action==='inventory-archive'){const {error}=await steward.admin.from('inventory').update({status:'archived',updated_at:new Date().toISOString()}).eq('id',clean(detail.productId,80));if(error)throw error}
-    if(action==='member-status'){const requested=clean(detail.status,40).toUpperCase();const mapped:Record<string,string>={APPROVED:'approved',REVIEW:'pending_review',SUSPENDED:'suspended'};const trust=mapped[requested];if(trust&&requested==='APPROVED'){const {data:profile}=await steward.admin.from('profiles').select('user_id').eq('avatar_name',title.replace(/^@/,'')).maybeSingle();if(!profile)return Response.json({error:'People profile not found'},{status:404});const {data:submission}=await steward.admin.from('onboarding_submissions').select('witness_selfie_path,witness_handle').eq('user_id',profile.user_id).maybeSingle();if(!submission?.witness_selfie_path||!submission.witness_handle)return Response.json({error:'Approval requires the joint selfie and existing member handle'},{status:409});const {error}=await steward.admin.rpc('approve_people_member',{target_handle:title,reviewer:steward.user.id});if(error)throw error}else if(trust){const {error}=await steward.admin.from('profiles').update({trust_status:trust,is_public:false,updated_at:new Date().toISOString()}).eq('avatar_name',title.replace(/^@/,''));if(error)throw error}}
-    if(action==='product-status'){const productId=clean(detail.productId,90);const requested=clean(detail.status,30).toUpperCase();const mapped:Record<string,{compliance_status:string;status:string}>={PERMITTED:{compliance_status:'permitted',status:'published'},REVIEW:{compliance_status:'pending_review',status:'pending_review'},BLOCKED:{compliance_status:'blocked',status:'paused'}};const update=mapped[requested];if(!productId||!update)return Response.json({error:'Valid product review decision required'},{status:400});const {data:product,error}=await steward.admin.from('products').update({...update,updated_at:new Date().toISOString()}).eq('id',productId).select('id').maybeSingle();if(error)throw error;if(!product)return Response.json({error:'Product not found'},{status:404})}
-    const targetType=action==='product-status'?'product':action.startsWith('inventory')||action==='stock-adjustment'?'inventory':'profile';const {data,error}=await steward.admin.from('admin_audit').insert({actor_id:steward.user.id,action,target_type:targetType,target_id:title,detail:{...detail,actedBy:steward.user.email}}).select('id').single();if(error)throw error;return Response.json({ok:true,id:data.id});
-  }catch{return unavailable()}
+export async function GET(req: Request) {
+  try {
+    const steward = await requireSteward(req);
+    if (!steward) {
+      return Response.json(
+        { error: "Platform steward access required" },
+        { status: 403 },
+      );
+    }
+    const [
+      { data, error },
+      { data: products, error: productError },
+      { data: profiles, error: profileError },
+      { data: submissions, error: submissionError },
+    ] = await Promise.all([
+      steward.admin
+        .from("admin_audit")
+        .select("id,action,target_id,detail,created_at")
+        .order("created_at", { ascending: true })
+        .limit(1000),
+      steward.admin
+        .from("products")
+        .select("id,name,sku,stock,compliance_status,status")
+        .order("updated_at", { ascending: false })
+        .limit(200),
+      steward.admin
+        .from("profiles")
+        .select(
+          "user_id,avatar_name,display_name,region,member_type,trust_status,platform_role,created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(200),
+      steward.admin
+        .from("onboarding_submissions")
+        .select(
+          "user_id,witness_handle,identity_document_path,witness_selfie_path,status,submitted_at,verified_at",
+        )
+        .limit(200),
+    ]);
+    if (error || productError || profileError || submissionError) {
+      throw error || productError || profileError || submissionError;
+    }
+    const submissionMap = new Map(
+      (submissions ?? []).map((item) => [item.user_id, item]),
+    );
+    const members = await Promise.all(
+      (profiles ?? []).map(async (profile) => {
+        const submission = submissionMap.get(profile.user_id);
+        let identityDocumentUrl: string | null = null;
+        let witnessSelfieUrl: string | null = null;
+        if (submission?.identity_document_path) {
+          const { data: signed } = await steward.admin.storage
+            .from("private-vault")
+            .createSignedUrl(submission.identity_document_path, 300);
+          identityDocumentUrl = signed?.signedUrl ?? null;
+        }
+        if (submission?.witness_selfie_path) {
+          const { data: signed } = await steward.admin.storage
+            .from("private-vault")
+            .createSignedUrl(submission.witness_selfie_path, 300);
+          witnessSelfieUrl = signed?.signedUrl ?? null;
+        }
+        return {
+          ...profile,
+          witness_handle: submission?.witness_handle ?? null,
+          identity_document_ready: Boolean(submission?.identity_document_path),
+          identity_document_url: identityDocumentUrl,
+          witness_selfie_ready: Boolean(submission?.witness_selfie_path),
+          witness_selfie_url: witnessSelfieUrl,
+          onboarding_status: submission?.status ?? null,
+          submitted_at: submission?.submitted_at ?? null,
+          verified_at: submission?.verified_at ?? null,
+        };
+      }),
+    );
+    return Response.json({
+      records: (data ?? []).map((row) => ({
+        id: row.id,
+        title: row.target_id,
+        data: { action: row.action, ...(row.detail as object) },
+        created_at: row.created_at,
+      })),
+      products: products ?? [],
+      members,
+    });
+  } catch {
+    return unavailable();
+  }
+}
+
+export async function POST(req: Request) {
+  const originError = rejectCrossOrigin(req);
+  if (originError) return originError;
+  try {
+    const steward = await requireSteward(req);
+    if (!steward) {
+      return Response.json(
+        { error: "Platform steward access required" },
+        { status: 403 },
+      );
+    }
+    const body = (await req.json()) as {
+      action?: unknown;
+      title?: unknown;
+      data?: Record<string, unknown>;
+    };
+    const action = clean(body.action, 40);
+    const title = clean(body.title);
+    const detail = body.data && typeof body.data === "object" ? body.data : {};
+    if (!actions.has(action) || !title) {
+      return Response.json(
+        { error: "Invalid administration action" },
+        { status: 400 },
+      );
+    }
+
+    if (action === "inventory-create") {
+      const stock = Math.max(0, Math.floor(Number(detail.stock) || 0));
+      const id = clean(detail.id, 80) || crypto.randomUUID();
+      const sku = clean(detail.sku, 80);
+      const name = clean(detail.name || title);
+      if (!sku || !name) {
+        return Response.json(
+          { error: "Product name and SKU are required" },
+          { status: 400 },
+        );
+      }
+      const { error } = await steward.admin.from("inventory").upsert({
+        id,
+        owner_id: steward.user.id,
+        sku,
+        name,
+        stock,
+        compliance_status: "pending_review",
+        status: "active",
+      });
+      if (error) throw error;
+    }
+
+    if (action === "stock-adjustment") {
+      const productId = clean(detail.productId, 80);
+      const stock = Math.max(0, Math.floor(Number(detail.stock) || 0));
+      const { error } = await steward.admin
+        .from("inventory")
+        .update({ stock, updated_at: new Date().toISOString() })
+        .eq("id", productId);
+      if (error) throw error;
+    }
+
+    if (action === "inventory-archive") {
+      const { error } = await steward.admin
+        .from("inventory")
+        .update({ status: "archived", updated_at: new Date().toISOString() })
+        .eq("id", clean(detail.productId, 80));
+      if (error) throw error;
+    }
+
+    if (action === "member-status") {
+      const requested = clean(detail.status, 40).toUpperCase();
+      const mapped: Record<string, string> = {
+        APPROVED: "approved",
+        REVIEW: "pending_review",
+        SUSPENDED: "suspended",
+      };
+      const trust = mapped[requested];
+      if (trust && requested === "APPROVED") {
+        const { data, error } = await steward.admin.rpc(
+          "approve_people_member",
+          { target_handle: title, reviewer: steward.user.id },
+        );
+        if (error) return approvalFailure(error);
+        return Response.json({ ok: true, approval: data });
+      }
+      if (trust) {
+        const { error } = await steward.admin
+          .from("profiles")
+          .update({
+            trust_status: trust,
+            is_public: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("avatar_name", title.replace(/^@/, ""));
+        if (error) throw error;
+      }
+    }
+
+    if (action === "product-status") {
+      const productId = clean(detail.productId, 90);
+      const requested = clean(detail.status, 30).toUpperCase();
+      const mapped: Record<
+        string,
+        { compliance_status: string; status: string }
+      > = {
+        PERMITTED: { compliance_status: "permitted", status: "published" },
+        REVIEW: { compliance_status: "pending_review", status: "pending_review" },
+        BLOCKED: { compliance_status: "blocked", status: "paused" },
+      };
+      const update = mapped[requested];
+      if (!productId || !update) {
+        return Response.json(
+          { error: "Valid product review decision required" },
+          { status: 400 },
+        );
+      }
+      const { data: product, error } = await steward.admin
+        .from("products")
+        .update({ ...update, updated_at: new Date().toISOString() })
+        .eq("id", productId)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!product) {
+        return Response.json({ error: "Product not found" }, { status: 404 });
+      }
+    }
+
+    const targetType =
+      action === "product-status"
+        ? "product"
+        : action.startsWith("inventory") || action === "stock-adjustment"
+          ? "inventory"
+          : "profile";
+    const { data, error } = await steward.admin
+      .from("admin_audit")
+      .insert({
+        actor_id: steward.user.id,
+        action,
+        target_type: targetType,
+        target_id: title,
+        detail: { ...detail, actedBy: steward.user.email },
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return Response.json({ ok: true, id: data.id });
+  } catch {
+    return unavailable();
+  }
 }

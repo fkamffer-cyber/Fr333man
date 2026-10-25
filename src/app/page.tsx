@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- policy routes intentionally use hard navigation */
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   people,
   products,
@@ -272,15 +272,6 @@ export default function Home() {
     });
     return () => lifecycle.abort();
   }, []);
-  const filteredPeople = useMemo(
-    () =>
-      people.filter((p) =>
-        `${p.name} ${p.handle} ${p.skills.join(" ")}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
-      ),
-    [search],
-  );
   return (
     <main
       onChangeCapture={uploadVault}
@@ -368,7 +359,6 @@ export default function Home() {
       )}
       {view === "People" && (
         <PeopleView
-          people={filteredPeople}
           search={search}
           setSearch={setSearch}
         />
@@ -575,17 +565,16 @@ function CommunityFeedPost({record}:{record:FeedRecord}){
 }
 
 function PeopleView({
-  people: members,
   search,
   setSearch,
 }: {
-  people: Person[];
   search: string;
   setSearch: (s: string) => void;
 }) {
   const [remotePeople,setRemotePeople]=useState<Person[]>([]);
-  useEffect(()=>{const controller=new AbortController();void fetch("/api/people",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profiles?:Array<{avatar_name:string;display_name?:string;region:string;bio:string;skills?:string[];trust_status:string}>};const mapped=(data.profiles??[]).map((profile,index)=>{const name=profile.display_name||profile.avatar_name;return{name,handle:`@${profile.avatar_name}`,initials:name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase(),region:profile.region,status:profile.trust_status.replaceAll("_"," ").toUpperCase(),color:["#e9b63c","#28a887","#709b48","#cf6e3a","#5a79bd"][index%5],skills:profile.skills??[],bio:profile.bio||"This People member has not added a public biography yet.",projects:0}});setRemotePeople(mapped)}).catch(()=>undefined);return()=>controller.abort()},[]);
-  const displayMembers=(remotePeople.length?remotePeople:members).filter(person=>`${person.name} ${person.handle} ${person.region} ${person.skills.join(" ")}`.toLowerCase().includes(search.toLowerCase()));
+  const [directoryState,setDirectoryState]=useState<"loading"|"ready"|"error">("loading");
+  useEffect(()=>{const controller=new AbortController();void fetch("/api/people",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profiles?:Array<{avatar_name:string;display_name?:string;region:string;bio:string;skills?:string[];trust_status:string}>};const mapped=(data.profiles??[]).map((profile,index)=>{const name=profile.display_name||profile.avatar_name;return{name,handle:`@${profile.avatar_name}`,initials:name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase(),region:profile.region,status:profile.trust_status.replaceAll("_"," ").toUpperCase(),color:["#e9b63c","#28a887","#709b48","#cf6e3a","#5a79bd"][index%5],skills:profile.skills??[],bio:profile.bio||"This People member has not added a public biography yet.",projects:0}});setRemotePeople(mapped);setDirectoryState("ready")}).catch(error=>{if(error instanceof DOMException&&error.name==="AbortError")return;setDirectoryState("error")});return()=>controller.abort()},[]);
+  const displayMembers=remotePeople.filter(person=>`${person.name} ${person.handle} ${person.region} ${person.skills.join(" ")}`.toLowerCase().includes(search.toLowerCase()));
   return (
     <section className="page-shell">
       <header className="page-title">
@@ -635,7 +624,7 @@ function PeopleView({
       </div>
       {!displayMembers.length && (
         <div className="empty">
-          No people match “{search}”. Try a skill or region.
+          {directoryState==="loading"?"Loading approved People…":directoryState==="error"?"The People directory could not be loaded. Please try again.":search?`No people match “${search}”. Try a skill or region.`:"No approved People are public yet."}
         </div>
       )}
     </section>
@@ -1002,7 +991,7 @@ function MyPage({
               <li className="done">Profile and avatar name</li>
               <li className="done">Entry account connected</li>
               <li className="done">10 free-thinking questions</li>
-              <li>Identity, liveness &amp; member witness</li>
+              <li>Identity evidence &amp; member witness</li>
               <li>$10 opening fee · due on day 14</li>
             </ul>
             <a className="primary" href="/onboarding">
@@ -1061,7 +1050,8 @@ function PlatformModal({
   ) => Promise<boolean>;
 }) {
   const [profileDraft,setProfileDraft]=useState<OwnProfile|null>(null);
-  useEffect(()=>{if(kind!=="profile")return;let active=true;void authenticatedHeaders().then(headers=>fetch("/api/people?mine=true",{headers})).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profile?:OwnProfile};if(active)setProfileDraft(data.profile??{avatar_name:"fr333man",display_name:"Francois Kamffer",region:"Randburg",bio:"",skills:[],trust_status:"pending_review",is_public:false})}).catch(()=>{if(active)setProfileDraft({avatar_name:"fr333man",display_name:"Francois Kamffer",region:"Randburg",bio:"",skills:[],trust_status:"pending_review",is_public:false})});return()=>{active=false}},[kind]);
+  const [profileLoadError,setProfileLoadError]=useState("");
+  useEffect(()=>{if(kind!=="profile")return;let active=true;void authenticatedHeaders().then(headers=>fetch("/api/people?mine=true",{headers})).then(async response=>{const data=await response.json() as {profile?:OwnProfile;error?:string};if(!response.ok)throw new Error(data.error||"Profile could not be loaded");if(!data.profile)throw new Error("Complete onboarding before editing your People profile");if(active)setProfileDraft(data.profile)}).catch(error=>{if(active)setProfileLoadError(error instanceof Error?error.message:"Profile could not be loaded")});return()=>{active=false}},[kind]);
   const submit = (entity: string) => (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -1160,7 +1150,7 @@ function PlatformModal({
             <label>Skills, separated by commas<input name="skills" value={(profileDraft.skills||[]).join(", ")} onChange={event=>setProfileDraft(current=>current&&({...current,skills:event.target.value.split(",").map(item=>item.trim())}))} /></label>
             <label className="check"><input type="checkbox" name="isPublic" checked={profileDraft.is_public} onChange={event=>setProfileDraft(current=>current&&({...current,is_public:event.target.checked}))} /> Publish my profile after approval.</label>
             <button className="primary">{saving ? "Saving…" : "Save profile"}</button>
-          </form> : <div className="empty-work"><b>Loading your profile…</b></div>
+          </form> : <div className="empty-work"><b>{profileLoadError||"Loading your profile…"}</b>{profileLoadError&&<a className="primary" href="/onboarding">Open onboarding</a>}</div>
         )}
         {kind === "project" && (
           <form onSubmit={submit("project")}>

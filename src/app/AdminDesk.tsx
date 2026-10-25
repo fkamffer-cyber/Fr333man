@@ -10,7 +10,23 @@ type StockItem = {
   stock: number;
   status: "active" | "review" | "archived";
 };
-type MemberRecord = {user_id:string;avatar_name:string;display_name:string|null;region:string;member_type:string;trust_status:string;platform_role:string;witness_handle:string|null;witness_selfie_ready:boolean;witness_selfie_url:string|null;onboarding_status:string|null;submitted_at:string|null;verified_at:string|null};
+type MemberRecord = {
+  user_id: string;
+  avatar_name: string;
+  display_name: string | null;
+  region: string;
+  member_type: string;
+  trust_status: string;
+  platform_role: string;
+  witness_handle: string | null;
+  identity_document_ready: boolean;
+  identity_document_url: string | null;
+  witness_selfie_ready: boolean;
+  witness_selfie_url: string | null;
+  onboarding_status: string | null;
+  submitted_at: string | null;
+  verified_at: string | null;
+};
 const initialStock: StockItem[] = [];
 
 export default function AdminDesk({
@@ -178,14 +194,23 @@ export default function AdminDesk({
                     <small>
                       {handle} · {person.region}
                     </small>
-                    <small>{person.witness_selfie_ready?`Joint selfie ready · witness ${person.witness_handle}`:"Joint selfie missing"}</small>
+                    <small>
+                      {person.identity_document_ready
+                        ? "Identity evidence ready"
+                        : "Identity evidence missing"}
+                      {" · "}
+                      {person.witness_selfie_ready
+                        ? `Joint selfie ready · witness ${person.witness_handle}`
+                        : "Joint selfie missing"}
+                    </small>
                   </span>
                   <span className="state">{status}</span>
                   <span>{person.platform_role.replaceAll("_"," ")}</span>
                   <span className="row-actions">
+                    {person.identity_document_url&&<a href={person.identity_document_url} target="_blank" rel="noreferrer">Review identity ↗</a>}
                     {person.witness_selfie_url&&<a href={person.witness_selfie_url} target="_blank" rel="noreferrer">Review selfie ↗</a>}
                     <button
-                      disabled={!person.witness_selfie_ready||person.trust_status==="approved"}
+                      disabled={!person.identity_document_url||!person.witness_selfie_url||person.trust_status==="approved"}
                       onClick={() =>
                         void memberAction(handle, "APPROVED")
                       }

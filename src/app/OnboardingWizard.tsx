@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- onboarding uses full navigation around authentication */
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
 
 const questions = [
@@ -30,8 +30,9 @@ type Draft = {
   privacy: boolean;
   fee: boolean;
 };
+type AuthStatus = "checking" | "signed-in" | "signed-out" | "unavailable";
 const initial: Draft = {
-  avatar: "fr333man",
+  avatar: "",
   region: "Randburg",
   memberType: "profile",
   email: "",
@@ -45,6 +46,31 @@ const initial: Draft = {
   fee: false,
 };
 
+const readSavedDraft = (): Draft | null => {
+  try {
+    const saved = localStorage.getItem("fr333man-onboarding-draft");
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as Partial<Draft>;
+    return {
+      ...initial,
+      ...parsed,
+      answers: questions.map((_, index) =>
+        typeof parsed.answers?.[index] === "string"
+          ? parsed.answers[index]
+          : "",
+      ),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const resumeStepFor = (draft: Draft) => {
+  if (draft.answers.every((answer) => answer.trim().length >= 10)) return 4;
+  if (draft.avatar.trim() && draft.region.trim()) return 3;
+  return 2;
+};
+
 export default function OnboardingWizard() {
   const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
   const appleEnabled = process.env.NEXT_PUBLIC_APPLE_AUTH_ENABLED === "true";
@@ -52,6 +78,10 @@ export default function OnboardingWizard() {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Draft>(initial);
   const [notice, setNotice] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
+  const [signedInAccount, setSignedInAccount] = useState("");
+  const draftHydrated = useRef(false);
   const [saving, setSaving] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
@@ -63,15 +93,112 @@ export default function OnboardingWizard() {
       : new URLSearchParams(window.location.search).get("invite") || "",
   );
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("fr333man-onboarding-draft");
-      if (saved) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setDraft({ ...initial, ...JSON.parse(saved) });
+    const supabase = getSupabaseBrowser();
+    if (!supabase) {
+      const timer = window.setTimeout(() => setAuthStatus("unavailable"), 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    let active = true;
+    const cleanCallbackUrl = () => {
+      const url = new URL(window.location.href);
+      for (const parameter of [
+        "code",
+        "error",
+        "error_code",
+        "error_description",
+      ]) {
+        url.searchParams.delete(parameter);
       }
-    } catch {}
+      if (
+        url.hash.includes("access_token=") ||
+        url.hash.includes("error_description=")
+      ) {
+        url.hash = "";
+      }
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    };
+    const acceptSession = (email?: string) => {
+      if (!active) return;
+      const accountEmail = email?.trim() || "your account";
+      const savedDraft = readSavedDraft();
+      setAuthStatus("signed-in");
+      setSignedInAccount(email?.trim() || "");
+      setDraft((current) => {
+        const recovered = savedDraft || current;
+        return recovered.email || !email
+          ? recovered
+          : { ...recovered, email };
+      });
+      setNotice(`Signed in as ${accountEmail}. Continue creating your profile.`);
+      setStep((current) =>
+        current === 1 ? resumeStepFor(savedDraft || initial) : current,
+      );
+      cleanCallbackUrl();
+    };
+    const recoverSession = async () => {
+      const callbackUrl = new URL(window.location.href);
+      const callbackError =
+        callbackUrl.searchParams.get("error_description") ||
+        callbackUrl.searchParams.get("error");
+      const { data, error } = await supabase.auth.getSession();
+      if (!active) return;
+      if (data.session) {
+        acceptSession(data.session.user.email);
+        return;
+      }
+      if (callbackError) {
+        setAuthStatus("signed-out");
+        setSignedInAccount("");
+        setNotice(
+          `Sign-in link could not be completed: ${callbackError.replaceAll("+", " ")}. Request a new link below.`,
+        );
+        cleanCallbackUrl();
+        return;
+      }
+      if (error) {
+        setNotice(`Sign-in could not be completed: ${error.message}`);
+      }
+      setAuthStatus("signed-out");
+      setSignedInAccount("");
+    };
+
+    void recoverSession();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) acceptSession(session.user.email);
+      else if (event === "SIGNED_OUT") {
+        setAuthStatus("signed-out");
+        setSignedInAccount("");
+      }
+    });
+    const recheckSession = () => void recoverSession();
+    window.addEventListener("focus", recheckSession);
+    window.addEventListener("storage", recheckSession);
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      window.removeEventListener("focus", recheckSession);
+      window.removeEventListener("storage", recheckSession);
+    };
   }, []);
   useEffect(() => {
+    const saved = readSavedDraft();
+    if (saved) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraft(saved);
+    }
+  }, []);
+  useEffect(() => {
+    if (!draftHydrated.current) {
+      draftHydrated.current = true;
+      return;
+    }
     localStorage.setItem("fr333man-onboarding-draft", JSON.stringify(draft));
   }, [draft]);
   const progress = useMemo(() => Math.round((step / 5) * 100), [step]);
@@ -85,9 +212,11 @@ export default function OnboardingWizard() {
       );
       return;
     }
+    const redirectUrl = new URL("/onboarding", window.location.origin);
+    if (inviteId) redirectUrl.searchParams.set("invite", inviteId);
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/onboarding` },
+      options: { redirectTo: redirectUrl.toString() },
     });
     if (error) setNotice(error.message);
   };
@@ -102,11 +231,27 @@ export default function OnboardingWizard() {
       setNotice("Enter your email address first.");
       return;
     }
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/onboarding` },
-    });
-    setNotice(error ? error.message : "Secure sign-in link sent. Open it on this device to continue.");
+    const redirectUrl = new URL("/onboarding", window.location.origin);
+    if (inviteId) redirectUrl.searchParams.set("invite", inviteId);
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectUrl.toString(),
+          shouldCreateUser: true,
+        },
+      });
+      setNotice(
+        error
+          ? error.message
+          : "Secure sign-in link sent. Open it in this same browser; onboarding will continue automatically after sign-in.",
+      );
+    } catch {
+      setNotice("The secure link could not be sent. Check your connection and try again.");
+    } finally {
+      setAuthBusy(false);
+    }
   };
   const sendOtp = async () => {
     const supabase = getSupabaseBrowser();
@@ -124,26 +269,47 @@ export default function OnboardingWizard() {
   const verifyOtp = async () => {
     const supabase = getSupabaseBrowser();
     if (!supabase) return;
-    const { error } = await supabase.auth.verifyOtp({
+    const { data, error } = await supabase.auth.verifyOtp({
       phone: draft.phone,
       token: otp,
       type: "sms",
     });
     if (error) setNotice(error.message);
     else {
+      setAuthStatus("signed-in");
+      setSignedInAccount(data.user?.phone || draft.phone);
       setNotice("Phone confirmed");
       setStep(2);
     }
+  };
+  const continueToIdentity = () => {
+    if (authStatus !== "signed-in") {
+      setNotice(
+        "Your answers are saved. Sign in before selecting private verification documents.",
+      );
+      setStep(1);
+      return;
+    }
+    setStep(4);
   };
   const finish = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft.terms || !draft.privacy || !draft.fee) return;
     setSaving(true);
+    let token = "";
+    let submissionSaved = false;
+    const uploadedKeys: string[] = [];
     try {
       const supabase = getSupabaseBrowser();
       const session = supabase ? await supabase.auth.getSession() : null;
-      const token = session?.data.session?.access_token;
-      if (!token) throw new Error("Sign in is required before submission");
+      token = session?.data.session?.access_token || "";
+      if (!token) {
+        setAuthStatus("signed-out");
+        setStep(1);
+        throw new Error(
+          "Your completed draft is saved. Sign in before submitting it for review.",
+        );
+      }
       let identityDocumentPath = "";
       let witnessSelfiePath = "";
       for (const [purpose, file] of [["identity", identityFile], ["witness-selfie", witnessFile]] as const) {
@@ -159,6 +325,7 @@ export default function OnboardingWizard() {
         const uploaded = (await upload.json()) as { key?: string; error?: string };
         if (!upload.ok || !uploaded.key)
           throw new Error(uploaded.error || "Verification upload failed");
+        uploadedKeys.push(uploaded.key);
         if (purpose === "identity") identityDocumentPath = uploaded.key;
         else witnessSelfiePath = uploaded.key;
       }
@@ -181,10 +348,26 @@ export default function OnboardingWizard() {
           },
         }),
       });
-      if (!response.ok) throw new Error();
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(result.error || "Submission could not be saved");
+      }
+      submissionSaved = true;
       localStorage.removeItem("fr333man-onboarding-draft");
       setStep(6);
     } catch (error) {
+      if (!submissionSaved && token && uploadedKeys.length) {
+        await fetch("/api/upload", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ keys: uploadedKeys }),
+        }).catch(() => undefined);
+      }
       setNotice(error instanceof Error ? error.message : "Submission could not be saved. Your draft remains on this device.");
     } finally {
       setSaving(false);
@@ -224,61 +407,76 @@ export default function OnboardingWizard() {
           <article>
             <h2>Connect an entry account</h2>
             <p>
-              Use an existing account for easier sign-in. This does not replace
-              identity, liveness or member-witness verification.
+              Sign in before submitting private verification evidence. This does not replace
+              identity or member-witness verification.
             </p>
-            {(googleEnabled || appleEnabled) && <div className="entry-options">
-              {googleEnabled && <button onClick={() => void social("google")}>
-                G&nbsp; Continue with Google
-              </button>}
-              {appleEnabled && <button onClick={() => void social("apple")}>
-                ● Continue with Apple
-              </button>}
-            </div>}
-            <div className="phone-auth">
-              <label>
-                Email address
-                <input
-                  value={draft.email}
-                  onChange={(e) => update("email", e.target.value)}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                />
-              </label>
-              <button onClick={() => void sendEmailLink()}>
-                Email me a secure sign-in link
-              </button>
-            </div>
-            {phoneEnabled && <div className="phone-auth">
-              <label>
-                Mobile number
-                <input
-                  value={draft.phone}
-                  onChange={(e) => update("phone", e.target.value)}
-                  type="tel"
-                  placeholder="+27…"
-                />
-              </label>
-              {!otpSent ? (
-                <button onClick={() => void sendOtp()}>Send code</button>
-              ) : (
-                <>
+            {authStatus === "signed-in" ? (
+              <div className="phone-auth">
+                <b>Signed in{signedInAccount ? ` as ${signedInAccount}` : ""}</b>
+                <button className="primary" onClick={() => setStep(resumeStepFor(draft))}>
+                  Continue with my saved draft
+                </button>
+              </div>
+            ) : (
+              <>
+                {authStatus === "checking" && <small>Checking your existing sign-in…</small>}
+                {(googleEnabled || appleEnabled) && <div className="entry-options">
+                  {googleEnabled && <button onClick={() => void social("google")}>
+                    G&nbsp; Continue with Google
+                  </button>}
+                  {appleEnabled && <button onClick={() => void social("apple")}>
+                    ● Continue with Apple
+                  </button>}
+                </div>}
+                <div className="phone-auth">
                   <label>
-                    Verification code
+                    Email address
                     <input
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
-                      inputMode="numeric"
+                      value={draft.email}
+                      onChange={(e) => update("email", e.target.value)}
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
                     />
                   </label>
-                  <button onClick={() => void verifyOtp()}>Verify code</button>
-                </>
-              )}
-            </div>}
-            <button className="text-button" onClick={() => setStep(2)}>
-              Continue and connect later →
-            </button>
+                  <button
+                    disabled={authBusy || authStatus === "unavailable"}
+                    onClick={() => void sendEmailLink()}
+                  >
+                    {authBusy ? "Sending secure link…" : "Email me a secure sign-in link"}
+                  </button>
+                </div>
+                {phoneEnabled && <div className="phone-auth">
+                  <label>
+                    Mobile number
+                    <input
+                      value={draft.phone}
+                      onChange={(e) => update("phone", e.target.value)}
+                      type="tel"
+                      placeholder="+27…"
+                    />
+                  </label>
+                  {!otpSent ? (
+                    <button onClick={() => void sendOtp()}>Send code</button>
+                  ) : (
+                    <>
+                      <label>
+                        Verification code
+                        <input
+                          value={otp}
+                          onChange={(e) => setOtp(e.target.value)}
+                          inputMode="numeric"
+                        />
+                      </label>
+                      <button onClick={() => void verifyOtp()}>Verify code</button>
+                    </>
+                  )}
+                </div>}
+                <small>
+                  Your draft stays on this device. Open the email link in this same browser so it can resume automatically.
+                </small>
+              </>
+            )}
           </article>
         )}
         {step === 2 && (
@@ -363,7 +561,7 @@ export default function OnboardingWizard() {
                 disabled={draft.answers.some(
                   (answer) => answer.trim().length < 10,
                 )}
-                onClick={() => setStep(4)}
+                onClick={continueToIdentity}
               >
                 Continue
               </button>
@@ -372,7 +570,7 @@ export default function OnboardingWizard() {
         )}
         {step === 4 && (
           <article>
-            <h2>Identity, liveness and people witness</h2>
+            <h2>Identity and People witness</h2>
             <p>
               Uploads are protected and never shown through the public
               membership QR. A trained reviewer must approve this step.
@@ -410,7 +608,7 @@ export default function OnboardingWizard() {
                   checked={draft.identityConsent}
                   onChange={(e) => update("identityConsent", e.target.checked)}
                 />{" "}
-                I consent to purpose-limited identity and liveness verification.
+                I consent to purpose-limited identity-evidence review.
               </label>
               <label className="check">
                 <input
@@ -513,7 +711,7 @@ export default function OnboardingWizard() {
           <article className="onboarding-complete">
             <b>Profile onboarding received</b>
             <p>
-              Trust features remain locked until identity, liveness and witness
+              Trust features remain locked until identity and member-witness
               evidence are approved. Administration applicants also require
               Ethics Committee approval.
             </p>
