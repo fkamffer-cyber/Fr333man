@@ -205,6 +205,7 @@ export async function POST(req: Request) {
       )
         ? String(data.memberType)
         : "profile";
+      const profilePublic = data.profilePublic !== false;
       const answers = Array.isArray(data.answers)
         ? data.answers.slice(0, 10).map((answer) => text(answer, 2000))
         : [];
@@ -286,22 +287,26 @@ export async function POST(req: Request) {
         return unavailable();
       }
 
-      const { error } = await admin.rpc("submit_people_onboarding", {
-        applicant: auth.user.id,
-        requested_avatar: avatar,
-        applicant_region: region,
-        requested_member_type: memberType,
-        free_thinking_answers: answers,
-        witness_handle: witness,
-        identity_path: identityDocumentPath,
-        selfie_path: witnessSelfiePath,
-        identity_consent: true,
-        witness_consent: true,
-        accepted_terms: true,
-        accepted_privacy: true,
-        acknowledged_fee: true,
-        invitation_id: rawInviteId || null,
-      });
+      const { data: submitted, error } = await admin.rpc(
+        "submit_people_onboarding_v2",
+        {
+          applicant: auth.user.id,
+          requested_avatar: avatar,
+          applicant_region: region,
+          requested_member_type: memberType,
+          free_thinking_answers: answers,
+          witness_handle: witness,
+          identity_path: identityDocumentPath,
+          selfie_path: witnessSelfiePath,
+          identity_consent: true,
+          witness_consent: true,
+          accepted_terms: true,
+          accepted_privacy: true,
+          acknowledged_fee: true,
+          invitation_id: rawInviteId || null,
+          requested_profile_public: profilePublic,
+        },
+      );
       if (error) {
         await removeVerificationFiles(admin, newlyUploadedPaths);
         return onboardingFailure(error);
@@ -311,10 +316,22 @@ export async function POST(req: Request) {
         (path) => !submittedPaths.includes(path),
       );
       await removeVerificationFiles(admin, replacedPaths);
+      const submission =
+        submitted && typeof submitted === "object" && !Array.isArray(submitted)
+          ? (submitted as Record<string, unknown>)
+          : {};
       return Response.json({
         ok: true,
         id: auth.user.id,
-        status: "pending_identity_review",
+        avatarName: text(submission.avatarName, 40) || avatar,
+        shopSlug: text(submission.shopSlug, 90) || null,
+        status:
+          text(submission.status, 60) || "pending_identity_review",
+        profilePublic:
+          typeof submission.profilePublic === "boolean"
+            ? submission.profilePublic
+            : profilePublic,
+        profileUrl: "/?view=My%20page&onboarding=submitted",
       });
     }
 

@@ -182,9 +182,10 @@ try {
     invitation_id: null,
   };
 
-  const rejected = await admin.rpc("submit_people_onboarding", {
+  const rejected = await admin.rpc("submit_people_onboarding_v2", {
     ...baseSubmission,
     witness_handle: `missing-${runId}`,
+    requested_profile_public: false,
   });
   assert(rejected.error, "Unknown witness was incorrectly accepted");
   assert(
@@ -203,9 +204,10 @@ try {
   console.log("PASS rejected onboarding rolls back atomically");
 
   const submitted = assertNoError(
-    await admin.rpc("submit_people_onboarding", {
+    await admin.rpc("submit_people_onboarding_v2", {
       ...baseSubmission,
       witness_handle: `@${witnessHandle}`,
+      requested_profile_public: false,
     }),
     "Submit valid onboarding",
   );
@@ -222,7 +224,7 @@ try {
   const pendingSubmission = assertNoError(
     await admin
       .from("onboarding_submissions")
-      .select("status,witness_user_id,welcome_post_id")
+      .select("status,witness_user_id,welcome_post_id,profile_public_after_approval")
       .eq("user_id", applicantId)
       .single(),
     "Read pending submission",
@@ -238,7 +240,8 @@ try {
   assert(
     pendingSubmission.status === "pending_identity_review" &&
       pendingSubmission.witness_user_id === witnessId &&
-      pendingSubmission.welcome_post_id === null,
+      pendingSubmission.welcome_post_id === null &&
+      pendingSubmission.profile_public_after_approval === false,
     "Pending submission state is inconsistent",
   );
   assert(pendingShop.status === "draft", "Shop activated before approval");
@@ -252,6 +255,7 @@ try {
     "Approve People member",
   );
   assert(approval.status === "approved", "Approval returned the wrong status");
+  assert(approval.profilePublic === false, "Approval ignored private visibility");
 
   const approvedProfile = assertNoError(
     await admin
@@ -290,7 +294,7 @@ try {
     .eq("target_id", `@${applicantHandle}`)
     .eq("action", "member-status");
   assertNoError({ data: null, error: auditError }, "Read approval audit");
-  assert(approvedProfile.trust_status === "approved" && approvedProfile.is_public, "Approved profile is not public");
+  assert(approvedProfile.trust_status === "approved" && !approvedProfile.is_public, "Private profile became public after approval");
   assert(
     approvedSubmission.status === "approved" &&
       approvedSubmission.identity_document_verified_at &&
@@ -304,18 +308,19 @@ try {
       welcomePost.data?.kind === "member_welcome" &&
       welcomePost.data?.profileUrl === `/people/${applicantHandle}` &&
       welcomePost.data?.shopUrl === `/shops/${activeShop.slug}` &&
+      welcomePost.data?.profilePublic === false &&
       !String(welcomePost.data?.body || "").toLowerCase().includes("liveness"),
-    "Welcome Feed post is missing truthful profile/shop links",
+    "Welcome Feed post is missing the private visibility marker",
   );
   assert(auditCount === 1, "Approval did not write exactly one audit record");
 
-  const publicProfile = assertNoError(
+  const privatePublicLookup = assertNoError(
     await publicClient
       .from("profiles")
       .select("avatar_name")
       .eq("user_id", applicantId)
-      .single(),
-    "Read approved profile through public RLS",
+      .maybeSingle(),
+    "Check private profile through public RLS",
   );
   const publicWelcome = assertNoError(
     await publicClient
@@ -325,7 +330,15 @@ try {
       .single(),
     "Read welcome post through public RLS",
   );
-  assert(publicProfile.avatar_name === applicantHandle && publicWelcome.id === welcomePost.id, "Public People/Feed records are unavailable");
+  assert(!privatePublicLookup && publicWelcome.id === welcomePost.id, "Private profile visibility or public welcome record is incorrect");
+
+  assertNoError(
+    await admin
+      .from("onboarding_submissions")
+      .update({ profile_public_after_approval: true })
+      .eq("user_id", applicantId),
+    "Change profile visibility preference",
+  );
 
   const secondApproval = assertNoError(
     await admin.rpc("approve_people_member", {
@@ -343,11 +356,33 @@ try {
   assertNoError({ data: null, error: repeatedAuditError }, "Read repeated approval audit");
   assert(
     secondApproval.welcomePostId === approvedSubmission.welcome_post_id &&
+      secondApproval.profilePublic === true &&
       repeatedAuditCount === 1,
     "Repeated approval created duplicate welcome or audit records",
   );
-  console.log("PASS approval atomically activates profile/shop and creates one welcome Feed post");
-  console.log("PASS public RLS and idempotent approval");
+  const republishedProfile = assertNoError(
+    await publicClient
+      .from("profiles")
+      .select("avatar_name")
+      .eq("user_id", applicantId)
+      .single(),
+    "Read republished profile through public RLS",
+  );
+  const updatedWelcome = assertNoError(
+    await admin
+      .from("community_records")
+      .select("data")
+      .eq("id", approvedSubmission.welcome_post_id)
+      .single(),
+    "Read republished welcome post",
+  );
+  assert(
+    republishedProfile.avatar_name === applicantHandle &&
+      updatedWelcome.data?.profilePublic === true,
+    "Public visibility preference was not applied",
+  );
+  console.log("PASS approval preserves private profiles and applies later visibility changes");
+  console.log("PASS approval creates one welcome Feed post and remains idempotent");
   testPassed = true;
 } finally {
   await cleanup();

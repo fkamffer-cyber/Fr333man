@@ -39,9 +39,11 @@ type Modal =
   | "checkout"
   | "vault"
   | "scan";
-type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;banner_url?:string|null};
+type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;publish_after_approval?:boolean;banner_url?:string|null};
 type FeedRecord={id:number;title:string;data:Record<string,unknown>;created_at:string;author:{avatar_name:string;display_name:string|null;region:string}|null};
 type AuthState="checking"|"signed_in"|"signed_out";
+type ProfileState="loading"|"ready"|"missing"|"error";
+type FeedState="loading"|"ready"|"error";
 const views: View[] = [
   "Feed",
   "People",
@@ -64,9 +66,20 @@ export default function Home() {
   const [promoted, setPromoted] = useState<string[]>([]);
   const [authState,setAuthState]=useState<AuthState>("checking");
   const [ownProfile,setOwnProfile]=useState<OwnProfile|null>(null);
+  const [profileState,setProfileState]=useState<ProfileState>("loading");
   const [saving, setSaving] = useState(false);
   const [scanSeconds, setScanSeconds] = useState(10);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const openView = (nextView: View) => {
+    const alreadyOpen = nextView === view;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: alreadyOpen && !reduceMotion ? "smooth" : "auto",
+    });
+    if (!alreadyOpen) setView(nextView);
+  };
   const show = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3400);
@@ -167,20 +180,26 @@ export default function Home() {
     let active=true;
     const load=async(accessToken?:string)=>{
       if(!active)return;
-      if(!accessToken){setAuthState("signed_out");setOwnProfile(null);setPromoted([]);return;}
+      if(!accessToken){setAuthState("signed_out");setOwnProfile(null);setProfileState("missing");setPromoted([]);return;}
       setAuthState("signed_in");
+      setProfileState("loading");
       const headers={Authorization:`Bearer ${accessToken}`};
-      const [profileResponse,promotionResponse]=await Promise.all([
-        fetch("/api/people?mine=true",{headers}),
-        fetch("/api/community?entity=promotion&mine=true",{headers}),
-      ]);
-      if(!active)return;
-      if(profileResponse.ok){const result=await profileResponse.json() as {profile?:OwnProfile};setOwnProfile(result.profile??null)}
-      if(promotionResponse.ok){
-        const result=await promotionResponse.json() as {records?:FeedRecord[]};
-        const latest=new Map<string,boolean>();
-        for(const record of result.records??[]){const id=String(record.data.productId||"");if(id&&!latest.has(id))latest.set(id,record.data.active===true)}
-        setPromoted([...latest].filter(([,enabled])=>enabled).map(([id])=>id));
+      try{
+        const [profileResponse,promotionResponse]=await Promise.all([
+          fetch("/api/people?mine=true",{headers}),
+          fetch("/api/community?entity=promotion&mine=true",{headers}),
+        ]);
+        if(!active)return;
+        if(profileResponse.ok){const result=await profileResponse.json() as {profile?:OwnProfile};const nextProfile=result.profile??null;setOwnProfile(nextProfile);setProfileState(nextProfile?"ready":"missing")}
+        else setProfileState("error");
+        if(promotionResponse.ok){
+          const result=await promotionResponse.json() as {records?:FeedRecord[]};
+          const latest=new Map<string,boolean>();
+          for(const record of result.records??[]){const id=String(record.data.productId||"");if(id&&!latest.has(id))latest.set(id,record.data.active===true)}
+          setPromoted([...latest].filter(([,enabled])=>enabled).map(([id])=>id));
+        }
+      }catch{
+        if(active)setProfileState("error");
       }
     };
     void supabase.auth.getSession().then(({data})=>load(data.session?.access_token));
@@ -290,7 +309,7 @@ export default function Home() {
         else if (label.startsWith("◯ Comment")) show("Comments opened");
         else if (label.startsWith("⌁ Share")) show("Post link copied");
         else if (label.startsWith("✦ Support")) {
-          setView("Membership");
+          openView("Membership");
           show("Membership benefits opened");
         }
       }}
@@ -303,7 +322,7 @@ export default function Home() {
       <header className="topbar">
         <button
           className="wordmark"
-          onClick={() => setView("Feed")}
+          onClick={() => openView("Feed")}
           aria-label="FR333MAN home"
         >
           <b>
@@ -316,7 +335,7 @@ export default function Home() {
             <button
               key={item}
               className={view === item ? "active" : ""}
-              onClick={() => setView(item)}
+              onClick={() => openView(item)}
             >
               {item}
             </button>
@@ -331,7 +350,7 @@ export default function Home() {
               placeholder="Search people, projects, products"
             />
           </label>
-          <button className="avatar-button" onClick={() => authState==="signed_in"?setView("My page"):window.location.assign("/onboarding")}>
+          <button className="avatar-button" onClick={() => authState==="signed_in"?openView("My page"):window.location.assign("/onboarding")}>
             <span>{authState==="signed_in"?(ownProfile?.display_name||ownProfile?.avatar_name||"ME").split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase():"↪"}</span>
             <b>{authState==="signed_in"?ownProfile?.display_name||ownProfile?.avatar_name||"My page":"Sign in"}</b>
           </button>
@@ -342,7 +361,7 @@ export default function Home() {
           <button
             key={item}
             className={view === item ? "active" : ""}
-            onClick={() => setView(item)}
+            onClick={() => openView(item)}
           >
             {item}
           </button>
@@ -350,7 +369,7 @@ export default function Home() {
       </div>
       {view === "Feed" && (
         <Feed
-          onView={setView}
+          onView={openView}
           onModal={setModal}
           promoted={promoted}
           authState={authState}
@@ -374,7 +393,7 @@ export default function Home() {
             setSelectedProduct(product);
             setModal("checkout");
           }}
-          onAdd={() => {setView("My Shop");window.setTimeout(()=>window.dispatchEvent(new Event("fr333man-open-product-wizard")),0)}}
+          onAdd={() => {openView("My Shop");window.setTimeout(()=>window.dispatchEvent(new Event("fr333man-open-product-wizard")),0)}}
         />
       )}
       {view === "Membership" && <MembershipDesk show={show} />}
@@ -386,8 +405,9 @@ export default function Home() {
         <MyPage
           promoted={promoted}
           onModal={setModal}
-          setView={setView}
+          setView={openView}
           authState={authState}
+          profileState={profileState}
           profile={ownProfile}
           onPromote={promote}
         />
@@ -422,11 +442,31 @@ function Feed({
   profile:OwnProfile|null;
 }) {
   const [feedPosts,setFeedPosts]=useState<FeedRecord[]>([]);
+  const [feedState,setFeedState]=useState<FeedState>("loading");
+  const [feedReload,setFeedReload]=useState(0);
   const signedIn=authState==="signed_in";
   const profileName=profile?.display_name||profile?.avatar_name||"Not signed in";
   const profileInitials=signedIn?profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase():"↪";
   const openComposer=()=>signedIn?onModal("post"):window.location.assign("/onboarding");
-  useEffect(()=>{const controller=new AbortController();const refresh=()=>void fetch("/api/community?entity=post",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const result=await response.json() as {records?:FeedRecord[]};setFeedPosts(result.records??[])}).catch(()=>undefined);refresh();window.addEventListener("fr333man-feed-refresh",refresh);return()=>{controller.abort();window.removeEventListener("fr333man-feed-refresh",refresh)}},[]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    let active=true;
+    const refresh=async()=>{
+      try{
+        const response=await fetch("/api/community?entity=post",{signal:controller.signal});
+        if(!response.ok)throw new Error("Feed request failed");
+        const result=await response.json() as {records?:FeedRecord[]};
+        if(!active)return;
+        setFeedPosts(result.records??[]);
+        setFeedState("ready");
+      }catch{
+        if(active&&!controller.signal.aborted)setFeedState("error");
+      }
+    };
+    void refresh();
+    window.addEventListener("fr333man-feed-refresh",refresh);
+    return()=>{active=false;controller.abort();window.removeEventListener("fr333man-feed-refresh",refresh)};
+  },[feedReload]);
   return (
     <div className="workspace">
       <aside className="left-rail">
@@ -488,7 +528,11 @@ function Feed({
             ◉ Live
           </button>
         </div>
-        {feedPosts.length?feedPosts.map(post=><CommunityFeedPost record={post} key={post.id}/>):<div className="empty-work feed-empty"><b>No People posts yet.</b><span>Verified member welcomes and member-created posts will appear here from the shared Feed.</span></div>}
+        <div className="feed-stream" aria-busy={feedState==="loading"}>
+          {feedState==="loading"&&<FeedLoading/>}
+          {feedState==="error"&&<div className="empty-work feed-empty"><b>The Feed could not load.</b><span>Your place on the page is protected. Check the connection and try again.</span><button onClick={()=>{setFeedState("loading");setFeedReload(value=>value+1)}}>Try again</button></div>}
+          {feedState==="ready"&&(feedPosts.length?feedPosts.map(post=><CommunityFeedPost record={post} key={post.id}/>):<div className="empty-work feed-empty"><b>No People posts yet.</b><span>Verified member welcomes and member-created posts will appear here from the shared Feed.</span></div>)}
+        </div>
       </section>
       <aside className="right-rail">
         <section className="live-now">
@@ -554,12 +598,18 @@ function Feed({
   );
 }
 
+function FeedLoading(){
+  return <div className="feed-loading" role="status" aria-label="Loading Feed posts">
+    {[0,1].map(item=><article className="post feed-placeholder" key={item} aria-hidden="true"><header><i></i><span><b></b><small></small></span></header><p></p><p></p><footer></footer></article>)}
+  </div>;
+}
+
 function CommunityFeedPost({record}:{record:FeedRecord}){
-  const welcome=record.data.kind==="member_welcome";const handle=record.author?.avatar_name?`@${record.author.avatar_name}`:String(record.data.handle||"@people");const name=record.author?.display_name||String(record.data.memberName||handle.replace(/^@/,""));const initials=name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const posted=new Intl.DateTimeFormat("en-ZA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(record.created_at));
+  const welcome=record.data.kind==="member_welcome";const profilePublic=record.data.profilePublic!==false;const handle=record.author?.avatar_name?`@${record.author.avatar_name}`:String(record.data.handle||"@people");const name=record.author?.display_name||String(record.data.memberName||handle.replace(/^@/,""));const initials=name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const posted=new Intl.DateTimeFormat("en-ZA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(record.created_at));
   return <article className={`post ${welcome?"welcome-post":""}`}>
-    <header className="post-head"><a className="avatar" href={`/people/${handle.replace(/^@/,"")}`}>{initials}</a><span><a href={`/people/${handle.replace(/^@/,"")}`}>{name}</a><small>{handle} · {posted}</small></span>{welcome&&<b className="people-badge">NEW PEOPLE MEMBER</b>}</header>
+    <header className="post-head">{profilePublic?<a className="avatar" href={`/people/${handle.replace(/^@/,"")}`}>{initials}</a>:<span className="avatar">{initials}</span>}<span>{profilePublic?<a href={`/people/${handle.replace(/^@/,"")}`}>{name}</a>:<b>{name}</b>}<small>{handle} · {posted}</small></span>{welcome&&<b className="people-badge">NEW PEOPLE MEMBER</b>}</header>
     <h2>{record.title}</h2><p>{String(record.data.body||"")}</p>
-    {welcome&&<nav className="welcome-links" aria-label="New member links"><a href={String(record.data.bioUrl||`/people/${handle.replace(/^@/,"")}#about`)}>Read bio</a><a href={String(record.data.profileUrl||`/people/${handle.replace(/^@/,"")}`)}>Open People page</a><a className="primary" href={String(record.data.shopUrl||`/shops/${handle.replace(/^@/,"")}`)}>Visit shop</a></nav>}
+    {welcome&&(profilePublic?<nav className="welcome-links" aria-label="New member links"><a href={String(record.data.bioUrl||`/people/${handle.replace(/^@/,"")}#about`)}>Read bio</a><a href={String(record.data.profileUrl||`/people/${handle.replace(/^@/,"")}`)}>Open People page</a><a className="primary" href={String(record.data.shopUrl||`/shops/${handle.replace(/^@/,"")}`)}>Visit shop</a></nav>:<small className="verification-guidance">This member keeps their People profile private.</small>)}
     <PostActions postId={`community-${record.id}`} show={()=>{}} />
   </article>
 }
@@ -883,6 +933,7 @@ function MyPage({
   onModal,
   setView,
   authState,
+  profileState,
   profile,
   onPromote,
 }: {
@@ -890,6 +941,7 @@ function MyPage({
   onModal: (m: Modal) => void;
   setView: (v: View) => void;
   authState:AuthState;
+  profileState:ProfileState;
   profile:OwnProfile|null;
   onPromote:(product:Product)=>void;
 }) {
@@ -897,7 +949,10 @@ function MyPage({
   const [ownProducts,setOwnProducts]=useState<Product[]>([]);
   useEffect(()=>{const controller=new AbortController();const load=async()=>{const headers=authState==="signed_in"?await authenticatedHeaders():{};const [marketResponse,ownResponse]=await Promise.all([fetch("/api/marketplace",{signal:controller.signal}),authState==="signed_in"?fetch("/api/marketplace?mine=true",{headers,signal:controller.signal}):Promise.resolve(null)]);if(marketResponse.ok){const data=await marketResponse.json() as {products?:Product[]};setMarketProducts(data.products??[])}if(ownResponse?.ok){const data=await ownResponse.json() as {products?:Product[]};setOwnProducts((data.products??[]).filter(product=>product.status==="published"))}};void load().catch(()=>undefined);return()=>controller.abort()},[authState]);
   if(authState!=="signed_in")return <section className="page-shell"><header className="page-title"><div><p>MY PEOPLE PAGE</p><h1>{authState==="checking"?"Checking your account…":"Sign in to open your page"}</h1><span>Your profile, shop products and promoted products are loaded from your authenticated account—not from sample data.</span></div>{authState==="signed_out"&&<a className="primary" href="/onboarding">Sign in or create account</a>}</header></section>;
+  if(profileState==="loading")return <section className="page-shell"><header className="page-title"><div><p>MY PEOPLE PAGE</p><h1>Opening your profile…</h1><span>Your submitted People profile is being loaded from your authenticated account.</span></div></header></section>;
+  if(!profile)return <section className="page-shell"><header className="page-title"><div><p>MY PEOPLE PAGE</p><h1>{profileState==="error"?"Your profile could not be loaded":"Complete your People profile"}</h1><span>{profileState==="error"?"Your sign-in is active, but the profile service did not respond. Reload this page to try again.":"This account has not submitted People onboarding yet."}</span></div>{profileState==="error"?<button className="primary" onClick={()=>window.location.reload()}>Reload profile</button>:<a className="primary" href="/onboarding">Start onboarding</a>}</header></section>;
   const profileName=profile?.display_name||profile?.avatar_name||"People member";const profileHandle=profile?.avatar_name?`@${profile.avatar_name}`:"@people";const profileInitials=profileName.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const profileSkills=profile?.skills?.length?profile.skills:[];
+  const pendingReview=profile.trust_status==="pending_review";const approved=profile.trust_status==="approved";
   const promotedProducts=marketProducts.filter(product=>promoted.includes(product.id));
   return (
     <section className="my-page">
@@ -915,9 +970,7 @@ function MyPage({
           <div className="profile-buttons">
             <button onClick={() => onModal("scan")}>Membership QR</button>
             <button onClick={() => onModal("profile")}>Edit profile</button>
-            <a className="primary" href="/onboarding">
-              Continue activation
-            </a>
+            {pendingReview?<span className="people-badge">REVIEW PENDING</span>:approved?<span className="people-badge">VERIFIED PEOPLE</span>:<a className="primary" href="/onboarding">Continue activation</a>}
           </div>
         </div>
       </header>
@@ -979,7 +1032,7 @@ function MyPage({
         <aside>
           <section className="activation">
             <p>ACCOUNT ACTIVATION</p>
-            <h2>Open now. Verify before trust features unlock.</h2>
+            <h2>{approved?"People membership verified.":pendingReview?"Submission received. People review is pending.":"Open now. Verify before trust features unlock."}</h2>
             <div className="activation-progress">
               <i></i>
               <i></i>
@@ -991,12 +1044,13 @@ function MyPage({
               <li className="done">Profile and avatar name</li>
               <li className="done">Entry account connected</li>
               <li className="done">10 free-thinking questions</li>
-              <li>Identity evidence &amp; member witness</li>
+              <li className={pendingReview||approved?"done":undefined}>Identity evidence &amp; member witness {pendingReview?"submitted":approved?"verified":""}</li>
               <li>$10 opening fee · due on day 14</li>
             </ul>
-            <a className="primary" href="/onboarding">
-              Continue activation
-            </a>
+            {pendingReview?<span className="people-badge">AWAITING PEOPLE REVIEW</span>:approved?<span className="people-badge">IDENTITY VERIFIED</span>:<a className="primary" href="/onboarding">Continue activation</a>}
+            <small>
+              Profile visibility: {pendingReview?(profile.publish_after_approval?"Public after approval":"Private"):profile.is_public?"Public":"Private"}. Change it from My page → Edit profile → Profile visibility.
+            </small>
             <small>
               Cancel within 14 days before the opening fee becomes due.
             </small>
@@ -1148,7 +1202,7 @@ function PlatformModal({
             <label>Region<input name="region" required value={profileDraft.region} onChange={event=>setProfileDraft(current=>current&&({...current,region:event.target.value}))} /></label>
             <label>Public biography<textarea name="bio" required rows={5} value={profileDraft.bio} onChange={event=>setProfileDraft(current=>current&&({...current,bio:event.target.value}))} /></label>
             <label>Skills, separated by commas<input name="skills" value={(profileDraft.skills||[]).join(", ")} onChange={event=>setProfileDraft(current=>current&&({...current,skills:event.target.value.split(",").map(item=>item.trim())}))} /></label>
-            <label className="check"><input type="checkbox" name="isPublic" checked={profileDraft.is_public} onChange={event=>setProfileDraft(current=>current&&({...current,is_public:event.target.checked}))} /> Publish my profile after approval.</label>
+             <fieldset className="visibility-choice"><legend>Profile visibility</legend><label className="check"><input type="checkbox" name="isPublic" checked={profileDraft.trust_status==="approved"?profileDraft.is_public:(profileDraft.publish_after_approval??profileDraft.is_public)} onChange={event=>setProfileDraft(current=>current&&({...current,is_public:event.target.checked,publish_after_approval:event.target.checked}))} /> Make my approved People profile public.</label><small>{profileDraft.trust_status==="approved"?"This change applies when you save.":"Your page remains private during review. This preference applies when approval is completed."}</small></fieldset>
             <button className="primary">{saving ? "Saving…" : "Save profile"}</button>
           </form> : <div className="empty-work"><b>{profileLoadError||"Loading your profile…"}</b>{profileLoadError&&<a className="primary" href="/onboarding">Open onboarding</a>}</div>
         )}

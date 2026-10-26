@@ -26,11 +26,25 @@ type Draft = {
   witness: string;
   identityConsent: boolean;
   witnessConsent: boolean;
+  profilePublic: boolean;
   terms: boolean;
   privacy: boolean;
   fee: boolean;
 };
 type AuthStatus = "checking" | "signed-in" | "signed-out" | "unavailable";
+type SubmissionResult = {
+  error?: string;
+  avatarName?: string;
+  profileUrl?: string;
+  profilePublic?: boolean;
+  status?: string;
+};
+type Completion = {
+  avatarName: string;
+  profileUrl: string;
+  profilePublic: boolean;
+};
+const defaultProfileUrl = "/?view=My%20page&onboarding=submitted";
 const initial: Draft = {
   avatar: "",
   region: "Randburg",
@@ -41,6 +55,7 @@ const initial: Draft = {
   witness: "",
   identityConsent: false,
   witnessConsent: false,
+  profilePublic: true,
   terms: false,
   privacy: false,
   fee: false,
@@ -81,6 +96,7 @@ export default function OnboardingWizard() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
   const [signedInAccount, setSignedInAccount] = useState("");
+  const [completion, setCompletion] = useState<Completion | null>(null);
   const draftHydrated = useRef(false);
   const [saving, setSaving] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
@@ -122,6 +138,25 @@ export default function OnboardingWizard() {
         `${url.pathname}${url.search}${url.hash}`,
       );
     };
+    let redirecting = false;
+    const openSubmittedProfile = async (accessToken: string) => {
+      try {
+        const response = await fetch("/api/people?mine=true", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        });
+        if (!response.ok) return false;
+        const result = (await response.json()) as {
+          profile?: { avatar_name?: string } | null;
+        };
+        if (!result.profile) return false;
+        redirecting = true;
+        window.location.replace("/?view=My%20page&onboarding=existing");
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const acceptSession = (email?: string) => {
       if (!active) return;
       const accountEmail = email?.trim() || "your account";
@@ -140,6 +175,11 @@ export default function OnboardingWizard() {
       );
       cleanCallbackUrl();
     };
+    const handleSession = async (accessToken: string, email?: string) => {
+      if (redirecting || !active) return;
+      if (await openSubmittedProfile(accessToken)) return;
+      acceptSession(email);
+    };
     const recoverSession = async () => {
       const callbackUrl = new URL(window.location.href);
       const callbackError =
@@ -148,7 +188,10 @@ export default function OnboardingWizard() {
       const { data, error } = await supabase.auth.getSession();
       if (!active) return;
       if (data.session) {
-        acceptSession(data.session.user.email);
+        await handleSession(
+          data.session.access_token,
+          data.session.user.email,
+        );
         return;
       }
       if (callbackError) {
@@ -171,7 +214,9 @@ export default function OnboardingWizard() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) acceptSession(session.user.email);
+      if (session) {
+        void handleSession(session.access_token, session.user.email);
+      }
       else if (event === "SIGNED_OUT") {
         setAuthStatus("signed-out");
         setSignedInAccount("");
@@ -201,6 +246,14 @@ export default function OnboardingWizard() {
     }
     localStorage.setItem("fr333man-onboarding-draft", JSON.stringify(draft));
   }, [draft]);
+  useEffect(() => {
+    if (step !== 6 || !completion) return;
+    const timer = window.setTimeout(
+      () => window.location.replace(completion.profileUrl),
+      900,
+    );
+    return () => window.clearTimeout(timer);
+  }, [completion, step]);
   const progress = useMemo(() => Math.round((step / 5) * 100), [step]);
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -348,14 +401,18 @@ export default function OnboardingWizard() {
           },
         }),
       });
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
+      const result = (await response.json().catch(() => ({}))) as SubmissionResult;
       if (!response.ok) {
         throw new Error(result.error || "Submission could not be saved");
       }
       submissionSaved = true;
       localStorage.removeItem("fr333man-onboarding-draft");
+      setCompletion({
+        avatarName: result.avatarName || draft.avatar,
+        profileUrl: result.profileUrl || defaultProfileUrl,
+        profilePublic: result.profilePublic ?? draft.profilePublic,
+      });
+      setNotice("Submission saved. Opening your private People page…");
       setStep(6);
     } catch (error) {
       if (!submissionSaved && token && uploadedKeys.length) {
@@ -482,7 +539,11 @@ export default function OnboardingWizard() {
         {step === 2 && (
           <article>
             <h2>Create your profile</h2>
-            <p>Your page can be visible before trust features are activated.</p>
+            <p>
+              Choose whether your profile becomes public after approval. While
+              review is pending, it remains visible only to you and authorised
+              reviewers.
+            </p>
             <div className="onboarding-form">
               <label>
                 Avatar name
@@ -513,6 +574,42 @@ export default function OnboardingWizard() {
                   </option>
                 </select>
               </label>
+              <fieldset className="visibility-choice">
+                <legend>Profile visibility after approval</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="profile-visibility"
+                    checked={draft.profilePublic}
+                    onChange={() => update("profilePublic", true)}
+                  />
+                  <span>
+                    <b>Public profile</b>
+                    <small>
+                      People can find your approved page, biography and shop.
+                    </small>
+                  </span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="profile-visibility"
+                    checked={!draft.profilePublic}
+                    onChange={() => update("profilePublic", false)}
+                  />
+                  <span>
+                    <b>Private profile</b>
+                    <small>
+                      Only you can open your People page; it stays out of the
+                      public directory.
+                    </small>
+                  </span>
+                </label>
+              </fieldset>
+              <small className="verification-guidance">
+                Change this later from My page → Edit profile → Profile
+                visibility.
+              </small>
             </div>
             <div className="wizard-actions">
               <button onClick={() => setStep(1)}>Back</button>
@@ -658,6 +755,10 @@ export default function OnboardingWizard() {
               <span>
                 Witness <b>{draft.witness}</b>
               </span>
+              <span>
+                Visibility{" "}
+                <b>{draft.profilePublic ? "Public after approval" : "Private"}</b>
+              </span>
             </div>
             <label className="check">
               <input
@@ -711,12 +812,15 @@ export default function OnboardingWizard() {
           <article className="onboarding-complete">
             <b>Profile onboarding received</b>
             <p>
-              Trust features remain locked until identity and member-witness
-              evidence are approved. Administration applicants also require
-              Ethics Committee approval.
+              Opening {completion?.avatarName ? `@${completion.avatarName}'s` : "your"}
+              {" "}private owner page. Trust features remain locked until
+              identity and member-witness evidence are approved. Your profile
+              {completion?.profilePublic
+                ? " will become public only after approval."
+                : " will remain private after approval unless you change it under My page → Edit profile → Profile visibility."}
             </p>
-            <a className="primary" href="/?view=My%20page">
-              Return to my page
+            <a className="primary" href={completion?.profileUrl || defaultProfileUrl}>
+              Open my People page now
             </a>
           </article>
         )}
