@@ -72,9 +72,17 @@ function onboardingFailure(error: { message?: string; code?: string } | null) {
     "This invitation is invalid, expired or already claimed",
   ];
   const clientMessage = clientErrors.find((item) => message.includes(item));
-  if (clientMessage) return Response.json({ error: clientMessage }, { status: 400 });
+  if (clientMessage)
+    return Response.json(
+      { error: clientMessage.replaceAll("membership", "peopleship") },
+      { status: 400 },
+    );
   const conflictMessage = conflictErrors.find((item) => message.includes(item));
-  if (conflictMessage) return Response.json({ error: conflictMessage }, { status: 409 });
+  if (conflictMessage)
+    return Response.json(
+      { error: conflictMessage.replaceAll("membership", "peopleship") },
+      { status: 409 },
+    );
   if (error?.code === "23505") {
     return Response.json(
       { error: "This avatar name is already in use" },
@@ -89,18 +97,29 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
     if (id) {
-      if (!/^[0-9a-f-]{36}$/i.test(id)) {
+      const invitationId = id.trim();
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          invitationId,
+        );
+      const isCode = /^[A-HJ-NP-Z2-9]{10}$/.test(invitationId.toUpperCase());
+      if (!isUuid && !isCode) {
         return Response.json({ error: "Invitation not found" }, { status: 404 });
       }
-      const { data, error } = await serviceSupabase()
+      let invitationQuery = serviceSupabase()
         .from("invitations")
         .select(
           "id,recipient_name,personal_message,source_url,source_metadata,status,expires_at",
         )
-        .eq("id", id)
         .eq("status", "unclaimed")
-        .gt("expires_at", new Date().toISOString())
-        .maybeSingle();
+        .gt("expires_at", new Date().toISOString());
+      invitationQuery = isUuid
+        ? invitationQuery.eq("id", invitationId)
+        : invitationQuery.eq(
+            "source_metadata->>claimCode",
+            invitationId.toUpperCase(),
+          );
+      const { data, error } = await invitationQuery.maybeSingle();
       if (error || !data) {
         return Response.json({ error: "Invitation not found" }, { status: 404 });
       }
@@ -213,7 +232,7 @@ export async function POST(req: Request) {
         return Response.json(
           {
             error:
-              "Complete all 10 free-thinking answers with at least 10 characters each",
+              "Choose one answer for each of the 10 free-thinking questions",
           },
           { status: 400 },
         );
@@ -358,6 +377,10 @@ export async function POST(req: Request) {
         source: text(data.source, 40),
         description: text(data.description, 500),
         image: text(data.image, 2048),
+        claimCode: Array.from(
+          crypto.getRandomValues(new Uint8Array(10)),
+          (value) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[value % 32],
+        ).join(""),
         claimed: false,
       };
       const { data: created, error } = await admin
@@ -372,7 +395,11 @@ export async function POST(req: Request) {
         .select("id")
         .single();
       if (error) throw error;
-      return Response.json({ ok: true, id: created.id });
+      return Response.json({
+        ok: true,
+        id: created.id,
+        code: metadata.claimCode,
+      });
     }
 
     if (!contentEntities.has(entity)) {

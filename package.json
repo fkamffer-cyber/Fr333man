@@ -1,6 +1,6 @@
 {
   "name": "sites-project",
-  "version": "0.1.0",
+  "version": "0.29.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -11,7 +11,8 @@
     "build:vercel": "next build",
     "start": "next start -p 3001",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "qa:onboarding": "node scripts/verify-onboarding.mjs"
+    "qa:onboarding": "node scripts/verify-onboarding.mjs",
+    "qa:invitation": "node scripts/verify-invitation.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

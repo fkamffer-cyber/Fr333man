@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- invite previews use reviewed public image hosts that are not known at build time */
 
 import { FormEvent, useState } from "react";
 import { authenticatedHeaders } from "./lib/supabase-browser";
@@ -9,6 +10,7 @@ type Preview = {
   url: string;
   source: string;
   limited?: boolean;
+  notice?: string;
 };
 export default function InviteDesk({
   show,
@@ -19,11 +21,15 @@ export default function InviteDesk({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [image, setImage] = useState("");
   const [message, setMessage] = useState(
     "I value the work you share and would like to invite you to claim a profile in our people-first community.",
   );
   const [loading, setLoading] = useState(false);
   const [invite, setInvite] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [trackingNotice, setTrackingNotice] = useState("");
   const inspect = async () => {
     setLoading(true);
     try {
@@ -37,7 +43,16 @@ export default function InviteDesk({
       setPreview(result);
       setName(result.title);
       setDescription(result.description);
-      show("Public page preview is ready for your review");
+      setImage(result.image);
+      setInvite("");
+      setInviteCode("");
+      setCreateError("");
+      setTrackingNotice("");
+      show(
+        result.limited
+          ? `${result.source} supplied limited details; review and complete the draft`
+          : "Public page image and details are ready for your review",
+      );
     } catch (error) {
       show(
         error instanceof Error
@@ -51,21 +66,29 @@ export default function InviteDesk({
   const create = async (event: FormEvent) => {
     event.preventDefault();
     if (!preview) return;
+    setCreateError("");
+    setTrackingNotice("");
     const invitationData = {
       name: name.trim().slice(0, 120),
       message: message.trim().slice(0, 500),
       sourceUrl: preview.url,
       source: preview.source,
       description: description.trim().slice(0, 500),
-      image: preview.image,
+      image: image.trim().slice(0, 2048),
       claimed: false,
     };
     try {
+      const authHeaders = await authenticatedHeaders();
+      if (!authHeaders.Authorization) {
+        throw new Error(
+          "Sign in as a FR333MAN member before creating a tracked invitation.",
+        );
+      }
       const response = await fetch("/api/community", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(await authenticatedHeaders()),
+          ...authHeaders,
         },
         body: JSON.stringify({
           entity: "invitation",
@@ -75,27 +98,58 @@ export default function InviteDesk({
       });
       const result = (await response.json()) as {
         id?: string | number;
+        code?: string;
+        error?: string;
       };
       const invitationId = String(result.id ?? "");
-      if (!response.ok || !invitationId) throw new Error();
+      const code = String(result.code || "").toUpperCase();
+      if (!response.ok || !invitationId) {
+        if (response.status >= 500) {
+          const bytes = new TextEncoder().encode(JSON.stringify(invitationData));
+          const encoded = btoa(String.fromCharCode(...bytes))
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=+$/g, "");
+          setInvite(`${window.location.origin}/invite/draft#data=${encoded}`);
+          setInviteCode("");
+          setTrackingNotice(
+            "Supabase invitation tracking is not connected on this release. This portable claim link works, but it has no tracked invitation code.",
+          );
+          show("Portable invitation created; tracking is not connected");
+          return;
+        }
+        throw new Error(result.error || "The invitation could not be saved.");
+      }
       setInvite(
-        `${window.location.origin}/invite/${encodeURIComponent(invitationId)}`,
+        `${window.location.origin}/invite/${encodeURIComponent(code || invitationId)}`,
       );
+      setInviteCode(code);
       show("Invitation profile created");
-    } catch {
-      const bytes = new TextEncoder().encode(JSON.stringify(invitationData));
-      const encoded = btoa(String.fromCharCode(...bytes))
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/g, "");
-      setInvite(`${window.location.origin}/invite/draft#data=${encoded}`);
-      show("Portable invitation link created");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The invitation could not be saved.";
+      setInvite("");
+      setInviteCode("");
+      setCreateError(message);
+      show(message);
     }
   };
   const copy = async () => {
-    await navigator.clipboard.writeText(`${message}\n\n${invite}`);
+    await navigator.clipboard.writeText(
+      `${message}\n\n${invite}${inviteCode ? `\nInvitation code: ${inviteCode}` : ""}`,
+    );
     show("Personal invitation copied");
   };
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?";
   return (
     <section className="operations-shell invite-desk">
       <header className="operations-hero">
@@ -129,10 +183,25 @@ export default function InviteDesk({
               </button>
             </div>
           </label>
+          <p className="invite-platform-note">
+            Automatic import uses only metadata the linked page publishes.
+            Facebook and LinkedIn do not allow your signed-in account to copy
+            another person&apos;s private profile. The invited person confirms or
+            replaces the draft details when claiming it.
+          </p>
           {preview && (
             <>
               <div className="invite-preview">
-                {preview.image && <img src={preview.image} alt="" />}
+                {image ? (
+                  <img
+                    src={image}
+                    alt={`${name || "Invitation"} public profile`}
+                  />
+                ) : (
+                  <div className="invite-preview-fallback" aria-hidden="true">
+                    {initials}
+                  </div>
+                )}
                 <span>
                   <small>{preview.source} · UNCLAIMED PROFILE DRAFT</small>
                   <h2>{name}</h2>
@@ -152,6 +221,20 @@ export default function InviteDesk({
                   onChange={(e) => setName(e.target.value)}
                   required
                 />
+              </label>
+              <label>
+                Public profile image link (optional)
+                <input
+                  type="url"
+                  value={image}
+                  onChange={(e) => setImage(e.target.value)}
+                  placeholder="https://…"
+                />
+                <small>
+                  Facebook personal profiles may withhold their photo. You can
+                  paste a public image link after confirming it belongs to the
+                  invited person.
+                </small>
               </label>
               <label>
                 Personal message
@@ -175,22 +258,39 @@ export default function InviteDesk({
                 />
                 {preview.limited && (
                   <small>
-                    This platform restricted its preview. Confirm the source
-                    and complete this summary manually.
+                    {preview.notice ||
+                      "This platform restricted its preview. The clean placeholder above will be used unless you add a verified public image."}
                   </small>
                 )}
               </label>
               <p className="invite-consent">
                 Only public metadata is used. The invited person must claim the
                 draft, consent to its use and complete verification before it
-                becomes a member profile.
+                becomes a People profile.
               </p>
               <button className="primary">Create invitation link</button>
             </>
           )}
+          {createError && (
+            <div className="onboarding-notice" role="alert">
+              <b>Invitation not created</b>
+              <p>{createError}</p>
+              {createError.toLowerCase().includes("sign in") && (
+                <a className="primary" href="/onboarding">
+                  Sign in or complete onboarding
+                </a>
+              )}
+            </div>
+          )}
           {invite && (
             <div className="invite-result">
               <b>Ready to share</b>
+              {trackingNotice && <span>{trackingNotice}</span>}
+              {inviteCode && (
+                <span>
+                  Invitation code: <strong>{inviteCode}</strong>
+                </span>
+              )}
               <a href={invite} target="_blank" rel="noreferrer">
                 {invite}
               </a>
@@ -203,8 +303,13 @@ export default function InviteDesk({
                 Open invitation
               </a>
               <button type="button" onClick={() => void copy()}>
-                Copy message and link
+                {inviteCode ? "Copy message, code and link" : "Copy message and link"}
               </button>
+              <small>
+                The recipient creates their own FR333MAN sign-in during
+                claiming. The hosted Site must be publicly shared before an
+                outside recipient can open it without a ChatGPT access prompt.
+              </small>
             </div>
           )}
         </form>

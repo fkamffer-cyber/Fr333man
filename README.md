@@ -1,13 +1,15 @@
 # FR333MAN Autonomy Hub
 
-FR333MAN is a People community platform built with Next.js and Supabase. It includes member profiles, onboarding and verification workflows, a community Feed, individual shops, a shared marketplace, memberships, invitations, project collaboration, private document storage, and a supervised multichannel sales desk.
+Current application release: **v0.29.0**. See [CHANGELOG.md](CHANGELOG.md) for the hosted release history.
+
+FR333MAN is a People community platform built with Next.js and Supabase. It includes People profiles, onboarding and verification workflows, a community Feed, individual shops, a shared marketplace, peopleships, invitations, project collaboration, private document storage, and a supervised multichannel sales desk.
 
 ## Stack
 
 - Next.js 16 and React 19
 - Supabase Auth, Postgres, Row Level Security, and Storage
 - Vercel serverless deployment
-- Paystack checkout integration for approved products and memberships
+- Paystack checkout integration for approved products and peopleships
 
 ## Local development
 

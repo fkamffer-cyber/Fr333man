@@ -38,7 +38,7 @@ export async function GET(req: Request) {
           .maybeSingle(),
         admin
           .from("onboarding_submissions")
-          .select("profile_public_after_approval")
+          .select("status,profile_public_after_approval")
           .eq("user_id", auth.user.id)
           .maybeSingle(),
       ]);
@@ -50,6 +50,7 @@ export async function GET(req: Request) {
               publish_after_approval:
                 submissionResult.data?.profile_public_after_approval ??
                 profileResult.data.is_public,
+              onboarding_status: submissionResult.data?.status ?? null,
             }
           : null,
       });

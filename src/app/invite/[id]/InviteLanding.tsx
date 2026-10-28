@@ -1,6 +1,7 @@
 "use client";
-/* eslint-disable @next/next/no-html-link-for-pages -- claim flow uses full navigation */
+/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- claim flow uses full navigation and reviewed public image hosts */
 import { useEffect, useState } from "react";
+import { release } from "../../release";
 type Invite = {
   name?: string;
   message?: string;
@@ -11,6 +12,7 @@ type Invite = {
 };
 export default function InviteLanding({ id }: { id: string }) {
   const [invite, setInvite] = useState<Invite | null>(null);
+  const [invitationId, setInvitationId] = useState("");
   const [missing, setMissing] = useState(false);
   useEffect(() => {
     const readPortableDraft = () => {
@@ -25,10 +27,31 @@ export default function InviteLanding({ id }: { id: string }) {
           character.charCodeAt(0),
         );
         const data = JSON.parse(new TextDecoder().decode(bytes)) as Invite;
-        const source = new URL(String(data.sourceUrl || ""));
+        let source = new URL(String(data.sourceUrl || ""));
         if (!["http:", "https:"].includes(source.protocol)) return null;
+        const sourceHost = source.hostname.toLowerCase();
+        const isFacebook =
+          sourceHost === "facebook.com" || sourceHost.endsWith(".facebook.com");
+        if (isFacebook && source.pathname.toLowerCase().startsWith("/login")) {
+          const next = source.searchParams.get("next");
+          if (next) {
+            const publicPage = new URL(next);
+            if (
+              ["http:", "https:"].includes(publicPage.protocol) &&
+              (publicPage.hostname.toLowerCase() === "facebook.com" ||
+                publicPage.hostname.toLowerCase().endsWith(".facebook.com"))
+            )
+              source = publicPage;
+          }
+        }
+        const facebookHandle = source.pathname.split("/").filter(Boolean)[0];
+        const suppliedName = String(data.name || "").trim();
+        const name =
+          /^facebook(?: profile)?$/i.test(suppliedName) && facebookHandle
+            ? `${decodeURIComponent(facebookHandle).replace(/[-_.]+/g, " ")} on Facebook`
+            : suppliedName || "Invited person";
         return {
-          name: String(data.name || "Invited person").slice(0, 120),
+          name: name.slice(0, 120),
           message: String(data.message || "").slice(0, 500),
           sourceUrl: source.toString(),
           source: String(data.source || "Public website").slice(0, 30),
@@ -50,12 +73,15 @@ export default function InviteLanding({ id }: { id: string }) {
     void fetch(`/api/community?id=${encodeURIComponent(id)}`)
       .then(async (response) =>
         (await response.json()) as {
-          records?: { entity: string; data: Invite }[];
+          records?: { id: string; entity: string; data: Invite }[];
         },
       )
       .then((result) => {
         const record = result.records?.[0];
-        if (record?.entity === "invitation") setInvite(record.data);
+        if (record?.entity === "invitation") {
+          setInvite(record.data);
+          setInvitationId(record.id);
+        }
         else setMissing(true);
       })
       .catch(() => {
@@ -77,18 +103,40 @@ export default function InviteLanding({ id }: { id: string }) {
         <p>Loading invitation…</p>
       </main>
     );
+  const initials =
+    String(invite.name || "Invited person")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?";
+  const claimUrl = invitationId
+    ? `/onboarding?invite=${encodeURIComponent(invitationId)}`
+    : "/onboarding";
+  const publicCode = /^[A-HJ-NP-Z2-9]{10}$/.test(id.toUpperCase())
+    ? id.toUpperCase()
+    : "";
   return (
     <main className="invite-landing">
       <nav>
         <a href="/">
           FR<span>333</span>MAN
         </a>
+        <span>{release.label}</span>
         <small>UNCLAIMED PROFILE DRAFT</small>
       </nav>
       <section>
-        {invite.image && <img src={invite.image} alt="" />}
+        {invite.image ? (
+          <img src={invite.image} alt={`${invite.name || "Invited person"} public profile`} />
+        ) : (
+          <div className="invite-landing-fallback" aria-hidden="true">
+            {initials}
+          </div>
+        )}
         <p>YOU ARE INVITED</p>
         <h1>{invite.name}</h1>
+        {publicCode && <strong>Invitation code: {publicCode}</strong>}
         <blockquote>{invite.message}</blockquote>
         <p>{invite.description}</p>
         <div>
@@ -97,14 +145,15 @@ export default function InviteLanding({ id }: { id: string }) {
           </a>
           <a
             className="primary"
-            href={`/onboarding?invite=${encodeURIComponent(id)}`}
+            href={claimUrl}
           >
             Claim this profile
           </a>
         </div>
         <small>
           This draft is based only on public page metadata. Claiming it requires
-          your consent and FR333MAN verification.
+          your consent and FR333MAN verification. You do not need the inviter&apos;s
+          ChatGPT account; you create your own FR333MAN sign-in.
         </small>
       </section>
     </main>

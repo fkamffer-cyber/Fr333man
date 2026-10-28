@@ -3,19 +3,93 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
+import { release } from "./release";
 
 const questions = [
-  "What evidence would change your mind?",
-  "How do you distinguish a fact from an opinion?",
-  "How should people disagree respectfully?",
-  "What responsibility follows freedom of expression?",
-  "How do you verify an important claim?",
-  "When should a community decision be reconsidered?",
-  "How would you repair harm you caused?",
-  "What makes cooperation voluntary?",
-  "How should conflicts of interest be declared?",
-  "What practical contribution would you like to make?",
-];
+  {
+    prompt: "What evidence would change your mind?",
+    options: [
+      "Check the source and method, then update my view if the evidence is reliable.",
+      "Reject it because it challenges what I already believe.",
+      "Share it immediately without checking whether it is reliable.",
+    ],
+  },
+  {
+    prompt: "How do you distinguish a fact from an opinion?",
+    options: [
+      "A fact can be checked against evidence; an opinion expresses a judgement.",
+      "A fact is whichever claim the most people repeat.",
+      "Facts and opinions are always the same thing.",
+    ],
+  },
+  {
+    prompt: "How should people disagree respectfully?",
+    options: [
+      "Address the idea, listen carefully, and avoid personal attacks.",
+      "Silence anyone who disagrees with the majority.",
+      "Keep repeating my view without listening to the other person.",
+    ],
+  },
+  {
+    prompt: "What responsibility follows freedom of expression?",
+    options: [
+      "Speak honestly while respecting other people's rights, privacy, and safety.",
+      "Say anything without accepting responsibility for avoidable harm.",
+      "Only speak when everyone already agrees with me.",
+    ],
+  },
+  {
+    prompt: "How do you verify an important claim?",
+    options: [
+      "Check original sources and compare independent, reliable evidence.",
+      "Trust the first result or forwarded message that I receive.",
+      "Accept it because it supports something I already believe.",
+    ],
+  },
+  {
+    prompt: "When should a community decision be reconsidered?",
+    options: [
+      "When credible evidence shows harm, an error, or changed circumstances.",
+      "Never, because a decision must remain permanent once made.",
+      "Whenever I personally do not get the outcome I wanted.",
+    ],
+  },
+  {
+    prompt: "How would you repair harm you caused?",
+    options: [
+      "Acknowledge it, listen, make amends, and change the behaviour.",
+      "Deny it and blame the person who was affected.",
+      "Apologise only when there will be no consequences for me.",
+    ],
+  },
+  {
+    prompt: "What makes cooperation voluntary?",
+    options: [
+      "People understand the choice and can freely consent or decline.",
+      "Pressure is acceptable whenever the cause seems important.",
+      "Consent is unnecessary when a majority has already agreed.",
+    ],
+  },
+  {
+    prompt: "How should conflicts of interest be declared?",
+    options: [
+      "Declare it early and step back when it could affect impartial judgement.",
+      "Hide it unless another person discovers it first.",
+      "Use it quietly when it gives me or my friends an advantage.",
+    ],
+  },
+  {
+    prompt: "What practical contribution would you like to make?",
+    options: [
+      "A realistic task that uses my skills, with progress updates and early requests for help.",
+      "Any task that sounds impressive, even if I cannot complete it.",
+      "No contribution, while still expecting other People to carry the work.",
+    ],
+  },
+] as const;
+const draftStorageKey = "fr333man-onboarding-draft";
+const resumeStorageKey = "fr333man-onboarding-resume-step";
+const answerIsComplete = (answer: string) => answer.trim().length >= 10;
 type Draft = {
   avatar: string;
   region: string;
@@ -63,7 +137,7 @@ const initial: Draft = {
 
 const readSavedDraft = (): Draft | null => {
   try {
-    const saved = localStorage.getItem("fr333man-onboarding-draft");
+    const saved = localStorage.getItem(draftStorageKey);
     if (!saved) return null;
     const parsed = JSON.parse(saved) as Partial<Draft>;
     return {
@@ -81,9 +155,34 @@ const readSavedDraft = (): Draft | null => {
 };
 
 const resumeStepFor = (draft: Draft) => {
-  if (draft.answers.every((answer) => answer.trim().length >= 10)) return 4;
+  if (draft.answers.every(answerIsComplete)) return 4;
   if (draft.avatar.trim() && draft.region.trim()) return 3;
   return 2;
+};
+
+const readRequestedResumeStep = () => {
+  try {
+    const saved = Number(localStorage.getItem(resumeStorageKey));
+    return Number.isInteger(saved) && saved >= 2 && saved <= 4 ? saved : 2;
+  } catch {
+    return 2;
+  }
+};
+
+const rememberResumeStep = (step: number) => {
+  try {
+    localStorage.setItem(resumeStorageKey, String(Math.min(4, Math.max(2, step))));
+  } catch {
+    // The questionnaire draft still remains in React state when storage is unavailable.
+  }
+};
+
+const clearRequestedResumeStep = () => {
+  try {
+    localStorage.removeItem(resumeStorageKey);
+  } catch {
+    // A blocked storage API must not prevent onboarding from continuing.
+  }
 };
 
 export default function OnboardingWizard() {
@@ -144,12 +243,22 @@ export default function OnboardingWizard() {
         const response = await fetch("/api/people?mine=true", {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: "no-store",
+          signal: AbortSignal.timeout(6000),
         });
         if (!response.ok) return false;
         const result = (await response.json()) as {
-          profile?: { avatar_name?: string } | null;
+          profile?: {
+            avatar_name?: string;
+            trust_status?: string;
+            onboarding_status?: string | null;
+          } | null;
         };
-        if (!result.profile) return false;
+        const profile = result.profile;
+        const submitted =
+          profile?.trust_status === "approved" ||
+          profile?.onboarding_status === "pending_identity_review" ||
+          profile?.onboarding_status === "approved";
+        if (!profile || !submitted) return false;
         redirecting = true;
         window.location.replace("/?view=My%20page&onboarding=existing");
         return true;
@@ -161,53 +270,66 @@ export default function OnboardingWizard() {
       if (!active) return;
       const accountEmail = email?.trim() || "your account";
       const savedDraft = readSavedDraft();
+      const recovered = savedDraft || initial;
+      const requestedStep = Math.max(
+        resumeStepFor(recovered),
+        readRequestedResumeStep(),
+      );
       setAuthStatus("signed-in");
       setSignedInAccount(email?.trim() || "");
       setDraft((current) => {
-        const recovered = savedDraft || current;
-        return recovered.email || !email
-          ? recovered
-          : { ...recovered, email };
+        const nextDraft = savedDraft || current;
+        return nextDraft.email || !email
+          ? nextDraft
+          : { ...nextDraft, email };
       });
       setNotice(`Signed in as ${accountEmail}. Continue creating your profile.`);
       setStep((current) =>
-        current === 1 ? resumeStepFor(savedDraft || initial) : current,
+        current === 1 ? requestedStep : current,
       );
+      clearRequestedResumeStep();
       cleanCallbackUrl();
     };
-    const handleSession = async (accessToken: string, email?: string) => {
+    let checkedAccessToken = "";
+    const handleSession = (accessToken: string, email?: string) => {
       if (redirecting || !active) return;
-      if (await openSubmittedProfile(accessToken)) return;
       acceptSession(email);
+      if (checkedAccessToken === accessToken) return;
+      checkedAccessToken = accessToken;
+      void openSubmittedProfile(accessToken);
     };
     const recoverSession = async () => {
-      const callbackUrl = new URL(window.location.href);
-      const callbackError =
-        callbackUrl.searchParams.get("error_description") ||
-        callbackUrl.searchParams.get("error");
-      const { data, error } = await supabase.auth.getSession();
-      if (!active) return;
-      if (data.session) {
-        await handleSession(
-          data.session.access_token,
-          data.session.user.email,
-        );
-        return;
-      }
-      if (callbackError) {
+      try {
+        const callbackUrl = new URL(window.location.href);
+        const callbackError =
+          callbackUrl.searchParams.get("error_description") ||
+          callbackUrl.searchParams.get("error");
+        const { data, error } = await supabase.auth.getSession();
+        if (!active) return;
+        if (data.session) {
+          handleSession(data.session.access_token, data.session.user.email);
+          return;
+        }
+        if (callbackError) {
+          setAuthStatus("signed-out");
+          setSignedInAccount("");
+          setNotice(
+            `Sign-in link could not be completed: ${callbackError.replaceAll("+", " ")}. Request a new link below.`,
+          );
+          cleanCallbackUrl();
+          return;
+        }
+        if (error) {
+          setNotice(`Sign-in could not be completed: ${error.message}`);
+        }
         setAuthStatus("signed-out");
         setSignedInAccount("");
-        setNotice(
-          `Sign-in link could not be completed: ${callbackError.replaceAll("+", " ")}. Request a new link below.`,
-        );
-        cleanCallbackUrl();
-        return;
+      } catch {
+        if (!active) return;
+        setAuthStatus("signed-out");
+        setSignedInAccount("");
+        setNotice("Sign-in could not be checked. Your saved answers are safe; try again.");
       }
-      if (error) {
-        setNotice(`Sign-in could not be completed: ${error.message}`);
-      }
-      setAuthStatus("signed-out");
-      setSignedInAccount("");
     };
 
     void recoverSession();
@@ -215,7 +337,7 @@ export default function OnboardingWizard() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        void handleSession(session.access_token, session.user.email);
+        handleSession(session.access_token, session.user.email);
       }
       else if (event === "SIGNED_OUT") {
         setAuthStatus("signed-out");
@@ -244,7 +366,7 @@ export default function OnboardingWizard() {
       draftHydrated.current = true;
       return;
     }
-    localStorage.setItem("fr333man-onboarding-draft", JSON.stringify(draft));
+    localStorage.setItem(draftStorageKey, JSON.stringify(draft));
   }, [draft]);
   useEffect(() => {
     if (step !== 6 || !completion) return;
@@ -267,6 +389,7 @@ export default function OnboardingWizard() {
     }
     const redirectUrl = new URL("/onboarding", window.location.origin);
     if (inviteId) redirectUrl.searchParams.set("invite", inviteId);
+    rememberResumeStep(resumeStepFor(draft));
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: { redirectTo: redirectUrl.toString() },
@@ -286,6 +409,7 @@ export default function OnboardingWizard() {
     }
     const redirectUrl = new URL("/onboarding", window.location.origin);
     if (inviteId) redirectUrl.searchParams.set("invite", inviteId);
+    rememberResumeStep(resumeStepFor(draft));
     setAuthBusy(true);
     try {
       const { error } = await supabase.auth.signInWithOtp({
@@ -332,11 +456,13 @@ export default function OnboardingWizard() {
       setAuthStatus("signed-in");
       setSignedInAccount(data.user?.phone || draft.phone);
       setNotice("Phone confirmed");
-      setStep(2);
+      setStep(Math.max(resumeStepFor(draft), readRequestedResumeStep()));
+      clearRequestedResumeStep();
     }
   };
   const continueToIdentity = () => {
     if (authStatus !== "signed-in") {
+      rememberResumeStep(4);
       setNotice(
         "Your answers are saved. Sign in before selecting private verification documents.",
       );
@@ -406,7 +532,8 @@ export default function OnboardingWizard() {
         throw new Error(result.error || "Submission could not be saved");
       }
       submissionSaved = true;
-      localStorage.removeItem("fr333man-onboarding-draft");
+      localStorage.removeItem(draftStorageKey);
+      clearRequestedResumeStep();
       setCompletion({
         avatarName: result.avatarName || draft.avatar,
         profileUrl: result.profileUrl || defaultProfileUrl,
@@ -436,6 +563,7 @@ export default function OnboardingWizard() {
         <a href="/?view=My%20page">
           FR<span>333</span>MAN
         </a>
+        <span>{release.label}</span>
         <a href="/?view=My%20page">Save and return later</a>
       </nav>
       <section className="onboarding-shell">
@@ -562,7 +690,7 @@ export default function OnboardingWizard() {
                 />
               </label>
               <label>
-                Membership path
+                Peopleship path
                 <select
                   value={draft.memberType}
                   onChange={(e) => update("memberType", e.target.value)}
@@ -627,37 +755,64 @@ export default function OnboardingWizard() {
           <article>
             <h2>Free-thinking validation</h2>
             <p>
-              Brief answers help the Ethics Committee understand how you examine
-              claims and resolve disagreement.
+              Choose the response that best supports open, respectful and
+              responsible participation. Select one answer for every question.
             </p>
             <div className="question-list">
-              {questions.map((question, index) => (
-                <label key={question}>
-                  <span>
-                    {index + 1}. {question}
-                  </span>
-                  <textarea
-                    rows={2}
-                    value={draft.answers[index]}
-                    onChange={(e) =>
-                      update(
-                        "answers",
-                        draft.answers.map((answer, i) =>
-                          i === index ? e.target.value : answer,
-                        ),
-                      )
-                    }
-                  />
-                </label>
-              ))}
+              {questions.map((question, index) => {
+                const answer = draft.answers[index] || "";
+                const isLegacyAnswer =
+                  answerIsComplete(answer) &&
+                  !question.options.some((option) => option === answer);
+                return (
+                  <fieldset className="question-choice" key={question.prompt}>
+                    <legend>
+                      <b>{index + 1}.</b> {question.prompt}
+                    </legend>
+                    {isLegacyAnswer && (
+                      <label className="selected legacy-answer">
+                        <input
+                          type="radio"
+                          name={`question-${index}`}
+                          checked
+                          onChange={() => undefined}
+                        />
+                        <span>
+                          <b>Keep my previously saved answer</b>
+                          <small>{answer}</small>
+                        </span>
+                      </label>
+                    )}
+                    {question.options.map((option) => (
+                      <label
+                        className={answer === option ? "selected" : ""}
+                        key={option}
+                      >
+                        <input
+                          type="radio"
+                          name={`question-${index}`}
+                          checked={answer === option}
+                          onChange={() =>
+                            update(
+                              "answers",
+                              draft.answers.map((current, answerIndex) =>
+                                answerIndex === index ? option : current,
+                              ),
+                            )
+                          }
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                );
+              })}
             </div>
             <div className="wizard-actions">
               <button onClick={() => setStep(2)}>Back</button>
               <button
                 className="primary"
-                disabled={draft.answers.some(
-                  (answer) => answer.trim().length < 10,
-                )}
+                disabled={draft.answers.some((answer) => !answerIsComplete(answer))}
                 onClick={continueToIdentity}
               >
                 Continue
@@ -670,7 +825,7 @@ export default function OnboardingWizard() {
             <h2>Identity and People witness</h2>
             <p>
               Uploads are protected and never shown through the public
-              membership QR. A trained reviewer must approve this step.
+              peopleship QR. A trained reviewer must approve this step.
             </p>
             <div className="onboarding-form">
               <label>

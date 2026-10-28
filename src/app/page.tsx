@@ -17,13 +17,14 @@ import MembershipDesk from "./MembershipDesk";
 import { authenticatedHeaders, getSupabaseBrowser } from "./lib/supabase-browser";
 import { marketplaceCategories } from "@/lib/marketplace-taxonomy";
 import { saveLocalProduct } from "./lib/local-products";
+import { release } from "./release";
 
 type View =
   | "Feed"
   | "People"
   | "Projects"
   | "Marketplace"
-  | "Membership"
+  | "Peopleship"
   | "Studio"
   | "Invites"
   | "My Shop"
@@ -49,7 +50,7 @@ const views: View[] = [
   "People",
   "Projects",
   "Marketplace",
-  "Membership",
+  "Peopleship",
   "Studio",
   "Invites",
   "My Shop",
@@ -162,7 +163,12 @@ export default function Home() {
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("view");
     // URL state is read once after hydration so public profile links open the requested workspace.
-    const compatibleView = requested === "My sales" ? "My Shop" : requested;
+    const compatibleView =
+      requested === "My sales"
+        ? "My Shop"
+        : requested === "Membership"
+          ? "Peopleship"
+          : requested;
     if (compatibleView && views.includes(compatibleView as View)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setView(compatibleView as View);
@@ -302,15 +308,15 @@ export default function Home() {
           show(
             `${label.replace("Continue with", "").trim()} account connection needs its OAuth credentials before launch`,
           );
-        else if (label === "Membership QR") setScanSeconds(10);
+        else if (label === "Peopleship QR") setScanSeconds(10);
         else if (label === "•••")
           show("Post actions: save and report controls will appear here");
         else if (label.startsWith("♥ Love")) show("Love recorded");
         else if (label.startsWith("◯ Comment")) show("Comments opened");
         else if (label.startsWith("⌁ Share")) show("Post link copied");
         else if (label.startsWith("✦ Support")) {
-          openView("Membership");
-          show("Membership benefits opened");
+          openView("Peopleship");
+          show("Peopleship benefits opened");
         }
       }}
     >
@@ -396,7 +402,7 @@ export default function Home() {
           onAdd={() => {openView("My Shop");window.setTimeout(()=>window.dispatchEvent(new Event("fr333man-open-product-wizard")),0)}}
         />
       )}
-      {view === "Membership" && <MembershipDesk show={show} />}
+      {view === "Peopleship" && <MembershipDesk show={show} />}
       {view === "Studio" && <StudioView onModal={setModal} show={show} />}
       {view === "Invites" && <InviteDesk show={show} />}
       {view === "My Shop" && <SalesDesk show={show} />}
@@ -478,7 +484,7 @@ function Feed({
           <span className="people-badge">{signedIn?`PEOPLE · ${(profile?.trust_status||"PENDING REVIEW").replaceAll("_"," ").toUpperCase()}`:"ACCOUNT REQUIRED"}</span>
           <dl>
             <div>
-              <dt>Membership</dt>
+              <dt>Peopleship</dt>
               <dd>Preview</dd>
             </div>
             <div>
@@ -816,7 +822,7 @@ function MarketView({
               <p>{p.description}</p>
               <div className="price">
                 <b>{p.price}</b>
-                <span>Eligible products may also appear in the monthly membership catalogue</span>
+                <span>Eligible products may also appear in the monthly peopleship catalogue</span>
               </div>
               <div className="card-actions">
                 <button className="primary" onClick={() => p.checkoutEnabled===false ? window.location.assign(`/products/${encodeURIComponent(p.slug||p.id)}`) : onSupport(p)}>
@@ -847,7 +853,7 @@ function MarketView({
       </div>
       <p className="legal-note">
         Products are purchased directly from the named seller unless clearly
-        marked as included in a People Membership. The seller remains
+        marked as included in a Peopleship. The seller remains
         responsible for the product, delivery, returns and taxes.
       </p>
     </section>
@@ -968,7 +974,7 @@ function MyPage({
             <p>{profileHandle} · {profile?.region||"Randburg"}</p>
           </div>
           <div className="profile-buttons">
-            <button onClick={() => onModal("scan")}>Membership QR</button>
+            <button onClick={() => onModal("scan")}>Peopleship QR</button>
             <button onClick={() => onModal("profile")}>Edit profile</button>
             {pendingReview?<span className="people-badge">REVIEW PENDING</span>:approved?<span className="people-badge">VERIFIED PEOPLE</span>:<a className="primary" href="/onboarding">Continue activation</a>}
           </div>
@@ -1032,7 +1038,7 @@ function MyPage({
         <aside>
           <section className="activation">
             <p>ACCOUNT ACTIVATION</p>
-            <h2>{approved?"People membership verified.":pendingReview?"Submission received. People review is pending.":"Open now. Verify before trust features unlock."}</h2>
+            <h2>{approved?"Peopleship verified.":pendingReview?"Submission received. People review is pending.":"Open now. Verify before trust features unlock."}</h2>
             <div className="activation-progress">
               <i></i>
               <i></i>
@@ -1056,11 +1062,11 @@ function MyPage({
             </small>
           </section>
           <section className="wallet membership-card">
-            <p>PEOPLE MEMBERSHIP</p>
+            <p>PEOPLESHIP</p>
             <strong>Monthly</strong>
             <span>Choose benefits and eligible products each month.</span>
             <div>
-              <button onClick={() => setView("Membership")}>Choose benefits</button>
+              <button onClick={() => setView("Peopleship")}>Choose benefits</button>
               <button onClick={() => setView("Marketplace")}>
                 View products
               </button>
@@ -1272,7 +1278,7 @@ function PlatformModal({
               <input name="stock" type="number" min="0" defaultValue="1" required />
             </label>
             <label className="check">
-              <input type="checkbox" name="membershipEligible" /> Make this product eligible for the monthly membership catalogue after review.
+              <input type="checkbox" name="membershipEligible" /> Make this product eligible for the monthly peopleship catalogue after review.
             </label>
             <label className="check">
               <input type="checkbox" required /> I confirm this item is lawful
@@ -1353,10 +1359,10 @@ function PlatformModal({
         )}
         {kind === "scan" && (
           <div className="scan-view">
-            <p>MEMBERSHIP CARD PREVIEW</p>
+            <p>PEOPLESHIP CARD PREVIEW</p>
             <div
               className="static-qr"
-              aria-label="Static membership QR preview"
+              aria-label="Static peopleship QR preview"
             >
               <i></i>
               <i></i>
@@ -1527,7 +1533,7 @@ function ProductCard({
 function PolicyFooter() {
   return (
     <footer className="policy-footer">
-      <span>FR333MAN · United as intended</span>
+      <span>FR333MAN · United as intended · {release.label}</span>
       <nav aria-label="Legal and support">
         <a href="/policies/terms">Terms</a>
         <a href="/policies/privacy">Privacy &amp; POPIA</a>
