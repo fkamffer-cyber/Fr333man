@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- native navigation avoids a Sites runtime prefetch failure */
 import {findPublicProduct} from "@/lib/public-directory";
 
 export default async function ProductListing({ params }: { params: Promise<{ id: string }> }) {
@@ -9,7 +9,7 @@ export default async function ProductListing({ params }: { params: Promise<{ id:
 
   return (
     <main className="product-listing">
-      <nav><Link href="/">FR<span>333</span>MAN</Link><Link href="/?view=Marketplace">Marketplace</Link></nav>
+      <nav><a href="/">FR<span>333</span>MAN</a><a href="/?view=Marketplace">Marketplace</a></nav>
       <article>
         <div className="listing-gallery">
           <div className="listing-visual">{product.images?.[0]?.url?<img src={product.images[0].url} alt={product.images[0].alt}/>:product.mark}</div>
@@ -19,7 +19,7 @@ export default async function ProductListing({ params }: { params: Promise<{ id:
           <small>{product.category.toUpperCase()} · PUBLIC PRODUCT LISTING</small>
           <h1>{product.name}</h1><strong>{product.price}</strong><p>{product.description}</p>
           <dl><div><dt>Seller</dt><dd>{product.owner}</dd></div><div><dt>Region</dt><dd>{product.region || (product.ownerHandle === "@fr333man" ? "Randburg" : "See seller profile")}</dd></div><div><dt>Availability</dt><dd>{product.stock===undefined ? "Confirm with seller" : `${product.stock} available`}</dd></div><div><dt>Peopleship</dt><dd>{product.membershipEligible ? "Eligible after monthly catalogue confirmation" : "Purchased separately"}</dd></div></dl>
-          <Link className="primary" href={`/?view=Marketplace&product=${encodeURIComponent(product.id)}`}>View in marketplace</Link>
+          <a className="primary" href={`/?view=Marketplace&product=${encodeURIComponent(product.id)}`}>View in marketplace</a>
           <footer>Confirm availability, condition, fulfilment and seller identity before payment. The named seller is responsible for the product and transaction.</footer>
         </section>
       </article>

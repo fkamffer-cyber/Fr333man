@@ -1,5 +1,10 @@
 # FR333MAN releases
 
+## v0.30.1 — Sites release 31 — 2026-11-03
+
+- Replaced Next client-link prefetching on public policy and product links with stable native navigation for the Sites runtime.
+- Cleared the production RSC-prefetch console error found during the release 30 smoke test.
+
 ## v0.30.0 — Sites release 30 — 2026-11-03
 
 - Corrected ZAR product prices so major currency values are stored as cents exactly once.

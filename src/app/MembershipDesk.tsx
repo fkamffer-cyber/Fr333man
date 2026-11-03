@@ -1,7 +1,7 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages -- native navigation avoids a Sites runtime prefetch failure */
 
 import {FormEvent, useEffect, useMemo, useState} from "react";
-import Link from "next/link";
 import {authenticatedHeaders} from "./lib/supabase-browser";
 
 type CatalogItem={id:string;slug:string;item_type:"benefit"|"product";title:string;description:string;fulfillment_note:string};
@@ -59,7 +59,7 @@ export default function MembershipDesk({show}:{show:(message:string)=>void}){
       <MembershipGroup title="Select your benefits" note={`Choose up to ${plan.benefit_selection_limit}`} items={benefits} selected={selected} onToggle={toggle}/>
       <MembershipGroup title="Select included products" note={`Choose up to ${plan.product_selection_limit} each month`} items={products} selected={selected} onToggle={toggle}/>
     </section><aside className="membership-summary"><p>YOUR MONTHLY CHOICES</p><h2>{selected.length} selected</h2><dl><div><dt>Benefits</dt><dd>{chosenBenefits} / {plan.benefit_selection_limit}</dd></div><div><dt>Products</dt><dd>{chosenProducts} / {plan.product_selection_limit}</dd></div><div><dt>Billing</dt><dd>{plan.billing_enabled?"Monthly":"Awaiting activation"}</dd></div></dl>
-      <form onSubmit={checkout}><label>Billing email<input name="email" type="email" required autoComplete="email"/></label><label className="check"><input name="policyAccepted" type="checkbox" required/> I accept the <Link href="/policies/terms">peopleship terms</Link> and recurring billing notice.</label><button className="primary" disabled={saving||!plan.enrollment_open}>{saving?"Saving…":plan.billing_enabled?"Save and start peopleship":"Save peopleship choices"}</button></form>
+      <form onSubmit={checkout}><label>Billing email<input name="email" type="email" required autoComplete="email"/></label><label className="check"><input name="policyAccepted" type="checkbox" required/> I accept the <a href="/policies/terms">peopleship terms</a> and recurring billing notice.</label><button className="primary" disabled={saving||!plan.enrollment_open}>{saving?"Saving…":plan.billing_enabled?"Save and start peopleship":"Save peopleship choices"}</button></form>
       <small>Benefits and product availability can change by month and region. A substitution or carry-over is never made without the member&apos;s confirmation.</small>
     </aside></div>
   </section>
