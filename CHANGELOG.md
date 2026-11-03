@@ -1,5 +1,13 @@
 # FR333MAN releases
 
+## v0.31.0 — Sites release 32 — 2026-11-03
+
+- Removed the remaining sample People, product, project and Feed-comment records from the live interface.
+- Connected Projects and project collaboration state to shared Supabase community records.
+- Added persisted Feed comments and Love reactions with working share links.
+- Replaced simulated Studio buttons with real local camera, microphone and screen-preview checks.
+- Made the Feed show honest empty states and current live People/project counts.
+
 ## v0.30.1 — Sites release 31 — 2026-11-03
 
 - Replaced Next client-link prefetching on public policy and product links with stable native navigation for the Sites runtime.

@@ -1,11 +1,8 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- policy routes intentionally use hard navigation */
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
-  people,
-  products,
-  projects,
   type Person,
   type Product,
   type Project,
@@ -42,9 +39,22 @@ type Modal =
   | "scan";
 type OwnProfile={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string;is_public:boolean;publish_after_approval?:boolean;banner_url?:string|null};
 type FeedRecord={id:number;title:string;data:Record<string,unknown>;created_at:string;author:{avatar_name:string;display_name:string|null;region:string}|null};
+type PublicProfileRow={avatar_name:string;display_name?:string|null;region:string;bio:string;skills?:string[];trust_status:string};
 type AuthState="checking"|"signed_in"|"signed_out";
 type ProfileState="loading"|"ready"|"missing"|"error";
 type FeedState="loading"|"ready"|"error";
+const accents=["#e9b63c","#28a887","#709b48","#cf6e3a","#5a79bd"];
+function personFromProfile(profile:PublicProfileRow,index:number):Person{
+  const name=profile.display_name||profile.avatar_name;
+  return{name,handle:`@${profile.avatar_name}`,initials:name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase(),region:profile.region,status:profile.trust_status.replaceAll("_"," ").toUpperCase(),color:accents[index%accents.length],skills:profile.skills??[],bio:profile.bio||"This People member has not added a public biography yet.",projects:0};
+}
+function projectFromRecord(record:FeedRecord,index:number):Project{
+  const data=record.data||{};
+  const firstTask=typeof data.firstTask==="string"?data.firstTask.trim():"";
+  const tasks=Array.isArray(data.tasks)?data.tasks.filter((task):task is string=>typeof task==="string"&&task.trim().length>0).map(task=>task.trim()).slice(0,12):firstTask?[firstTask]:[];
+  const progress=Math.max(0,Math.min(100,Number(data.progress)||0));
+  return{id:String(record.id),title:record.title,category:typeof data.category==="string"&&data.category.trim()?data.category.trim().toUpperCase():"PEOPLE PROJECT",region:typeof data.region==="string"&&data.region.trim()?data.region.trim():"United",status:"ACTIVE",summary:typeof data.outcome==="string"?data.outcome:"",progress,openTasks:tasks.length,people:Math.max(1,Number(data.people)||1),tasks,accent:accents[index%accents.length],icon:typeof data.icon==="string"&&data.icon.trim()?data.icon.trim().slice(0,2):"✦"};
+}
 const views: View[] = [
   "Feed",
   "People",
@@ -63,7 +73,7 @@ export default function Home() {
   const [modal, setModal] = useState<Modal>("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
-  const [joined, setJoined] = useState<string[]>(["soil-circles"]);
+  const [joined, setJoined] = useState<string[]>([]);
   const [promoted, setPromoted] = useState<string[]>([]);
   const [authState,setAuthState]=useState<AuthState>("checking");
   const [ownProfile,setOwnProfile]=useState<OwnProfile|null>(null);
@@ -101,6 +111,7 @@ export default function Home() {
       const result = await response.json() as {error?:string};
       if (!response.ok) throw new Error(result.error || "Save failed");
       if(entity==="post")window.dispatchEvent(new Event("fr333man-feed-refresh"));
+      if(entity==="project")window.dispatchEvent(new Event("fr333man-projects-refresh"));
       show(marketplaceProduct ? `${title} submitted for marketplace review` : `${title} saved to the community`);
       setModal("");
       return true;
@@ -118,12 +129,12 @@ export default function Home() {
       setSaving(false);
     }
   };
-  const join = (project: Project) => {
-    setJoined((v) => (v.includes(project.id) ? v : [...v, project.id]));
-    void save("task", `Joined ${project.title}`, {
+  const join = async (project: Project) => {
+    const saved = await save("task", `Joined ${project.title}`, {
       projectId: project.id,
       role: "contributor",
     });
+    if(saved){setJoined((value) => value.includes(project.id) ? value : [...value, project.id]);window.dispatchEvent(new Event("fr333man-projects-refresh"))}
   };
   const promote = async (product: Product) => {
     if(authState!=="signed_in"){
@@ -186,14 +197,15 @@ export default function Home() {
     let active=true;
     const load=async(accessToken?:string)=>{
       if(!active)return;
-      if(!accessToken){setAuthState("signed_out");setOwnProfile(null);setProfileState("missing");setPromoted([]);return;}
+      if(!accessToken){setAuthState("signed_out");setOwnProfile(null);setProfileState("missing");setPromoted([]);setJoined([]);return;}
       setAuthState("signed_in");
       setProfileState("loading");
       const headers={Authorization:`Bearer ${accessToken}`};
       try{
-        const [profileResponse,promotionResponse]=await Promise.all([
+        const [profileResponse,promotionResponse,taskResponse]=await Promise.all([
           fetch("/api/people?mine=true",{headers}),
           fetch("/api/community?entity=promotion&mine=true",{headers}),
+          fetch("/api/community?entity=task&mine=true",{headers}),
         ]);
         if(!active)return;
         if(profileResponse.ok){const result=await profileResponse.json() as {profile?:OwnProfile};const nextProfile=result.profile??null;setOwnProfile(nextProfile);setProfileState(nextProfile?"ready":"missing")}
@@ -203,6 +215,10 @@ export default function Home() {
           const latest=new Map<string,boolean>();
           for(const record of result.records??[]){const id=String(record.data.productId||"");if(id&&!latest.has(id))latest.set(id,record.data.active===true)}
           setPromoted([...latest].filter(([,enabled])=>enabled).map(([id])=>id));
+        }
+        if(taskResponse.ok){
+          const result=await taskResponse.json() as {records?:FeedRecord[]};
+          setJoined(Array.from(new Set((result.records??[]).filter(record=>record.data.role==="contributor").map(record=>String(record.data.projectId||"")).filter(Boolean))));
         }
       }catch{
         if(active)setProfileState("error");
@@ -249,20 +265,28 @@ export default function Home() {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true, untrustedContentHint: true },
-      execute: (input: unknown) => {
+      execute: async (input: unknown) => {
         const query =
           typeof (input as { query?: unknown })?.query === "string"
             ? (input as { query: string }).query.trim()
             : "";
         if (!query) throw new Error("A non-empty search query is required");
+        const [peopleResponse, projectsResponse, productsResponse] = await Promise.all([
+          fetch("/api/people"),
+          fetch("/api/community?entity=project"),
+          fetch("/api/marketplace"),
+        ]);
+        const peopleResult = peopleResponse.ok ? await peopleResponse.json() as {profiles?:Array<{display_name?:string|null;avatar_name:string}>} : {};
+        const projectsResult = projectsResponse.ok ? await projectsResponse.json() as {records?:FeedRecord[]} : {};
+        const productsResult = productsResponse.ok ? await productsResponse.json() as {products?:Product[]} : {};
         setSearch(query);
         setView("People");
         return {
           query,
           matches: [
-            ...people.map((p) => p.name),
-            ...projects.map((p) => p.title),
-            ...products.map((p) => p.name),
+            ...(peopleResult.profiles??[]).map(profile=>profile.display_name||profile.avatar_name),
+            ...(projectsResult.records??[]).map(project=>project.title),
+            ...(productsResult.products??[]).map(product=>product.name),
           ]
             .filter((name) => name.toLowerCase().includes(query.toLowerCase()))
             .slice(0, 8),
@@ -277,20 +301,20 @@ export default function Home() {
       inputSchema: {
         type: "object",
         properties: {
-          projectId: { type: "string", enum: projects.map((p) => p.id) },
+          projectId: { type: "string", minLength: 1 },
         },
         required: ["projectId"],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
-      execute: (input: unknown) => {
+      execute: async (input: unknown) => {
         const id =
           typeof (input as { projectId?: unknown })?.projectId === "string"
             ? (input as { projectId: string }).projectId
             : "";
-        if (!projects.some((project) => project.id === id))
-          throw new Error("Unknown project id");
-        setSearch(id);
+        const response=await fetch("/api/community?entity=project");
+        const result=response.ok?await response.json() as {records?:FeedRecord[]}:{};
+        if (!(result.records??[]).some((project) => String(project.id) === id)) throw new Error("Unknown project id");
         setView("Projects");
         return { opened: id };
       },
@@ -311,13 +335,6 @@ export default function Home() {
         else if (label === "Peopleship QR") setScanSeconds(10);
         else if (label === "•••")
           show("Post actions: save and report controls will appear here");
-        else if (label.startsWith("♥ Love")) show("Love recorded");
-        else if (label.startsWith("◯ Comment")) show("Comments opened");
-        else if (label.startsWith("⌁ Share")) show("Post link copied");
-        else if (label.startsWith("✦ Support")) {
-          openView("Peopleship");
-          show("Peopleship benefits opened");
-        }
       }}
     >
       {notice && (
@@ -380,6 +397,7 @@ export default function Home() {
           promoted={promoted}
           authState={authState}
           profile={ownProfile}
+          show={show}
         />
       )}
       {view === "People" && (
@@ -389,7 +407,7 @@ export default function Home() {
         />
       )}
       {view === "Projects" && (
-        <ProjectsView joined={joined} onJoin={join} onModal={setModal} />
+        <ProjectsView joined={joined} onJoin={join} onModal={setModal} authState={authState} />
       )}
       {view === "Marketplace" && (
         <MarketView
@@ -403,7 +421,7 @@ export default function Home() {
         />
       )}
       {view === "Peopleship" && <MembershipDesk show={show} />}
-      {view === "Studio" && <StudioView onModal={setModal} show={show} />}
+      {view === "Studio" && <StudioView show={show} />}
       {view === "Invites" && <InviteDesk show={show} />}
       {view === "My Shop" && <SalesDesk show={show} />}
       {view === "Administration" && <AdminDesk show={show} />}
@@ -440,14 +458,18 @@ function Feed({
   promoted,
   authState,
   profile,
+  show,
 }: {
   onView: (v: View) => void;
   onModal: (m: Modal) => void;
   promoted: string[];
   authState:AuthState;
   profile:OwnProfile|null;
+  show:(message:string)=>void;
 }) {
   const [feedPosts,setFeedPosts]=useState<FeedRecord[]>([]);
+  const [projectPreviews,setProjectPreviews]=useState<Project[]>([]);
+  const [peoplePreviews,setPeoplePreviews]=useState<Person[]>([]);
   const [feedState,setFeedState]=useState<FeedState>("loading");
   const [feedReload,setFeedReload]=useState(0);
   const signedIn=authState==="signed_in";
@@ -473,6 +495,29 @@ function Feed({
     window.addEventListener("fr333man-feed-refresh",refresh);
     return()=>{active=false;controller.abort();window.removeEventListener("fr333man-feed-refresh",refresh)};
   },[feedReload]);
+  useEffect(()=>{
+    if(feedState!=="ready"||!window.location.hash)return;
+    const id=decodeURIComponent(window.location.hash.slice(1));
+    window.requestAnimationFrame(()=>document.getElementById(id)?.scrollIntoView({block:"start",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}));
+  },[feedPosts,feedState]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    let active=true;
+    const refresh=async()=>{
+      try{
+        const [projectsResponse,peopleResponse]=await Promise.all([
+          fetch("/api/community?entity=project",{signal:controller.signal}),
+          fetch("/api/people",{signal:controller.signal}),
+        ]);
+        if(!active)return;
+        if(projectsResponse.ok){const result=await projectsResponse.json() as {records?:FeedRecord[]};setProjectPreviews((result.records??[]).map(projectFromRecord))}
+        if(peopleResponse.ok){const result=await peopleResponse.json() as {profiles?:PublicProfileRow[]};setPeoplePreviews((result.profiles??[]).map(personFromProfile))}
+      }catch(error){if(!(error instanceof DOMException&&error.name==="AbortError")){setProjectPreviews([]);setPeoplePreviews([])}}
+    };
+    void refresh();
+    window.addEventListener("fr333man-projects-refresh",refresh);
+    return()=>{active=false;controller.abort();window.removeEventListener("fr333man-projects-refresh",refresh)};
+  },[]);
   return (
     <div className="workspace">
       <aside className="left-rail">
@@ -489,7 +534,7 @@ function Feed({
             </div>
             <div>
               <dt>Projects</dt>
-              <dd>3</dd>
+              <dd>{projectPreviews.length}</dd>
             </div>
             <div>
               <dt>Promoting</dt>
@@ -537,26 +582,24 @@ function Feed({
         <div className="feed-stream" aria-busy={feedState==="loading"}>
           {feedState==="loading"&&<FeedLoading/>}
           {feedState==="error"&&<div className="empty-work feed-empty"><b>The Feed could not load.</b><span>Your place on the page is protected. Check the connection and try again.</span><button onClick={()=>{setFeedState("loading");setFeedReload(value=>value+1)}}>Try again</button></div>}
-          {feedState==="ready"&&(feedPosts.length?feedPosts.map(post=><CommunityFeedPost record={post} key={post.id}/>):<div className="empty-work feed-empty"><b>No People posts yet.</b><span>Verified member welcomes and member-created posts will appear here from the shared Feed.</span></div>)}
+          {feedState==="ready"&&(feedPosts.length?feedPosts.map(post=><CommunityFeedPost record={post} authState={authState} show={show} key={post.id}/>):<div className="empty-work feed-empty"><b>No People posts yet.</b><span>Verified member welcomes and member-created posts will appear here from the shared Feed.</span></div>)}
         </div>
       </section>
       <aside className="right-rail">
         <section className="live-now">
           <div>
-            <span>LIVE FRIDAY · 16:20</span>
-            <b>The Debrief</b>
-            <p>
-              Water, soil, autonomy—and the strongest answers from this week.
-            </p>
+            <span>LIVE STREAM SETUP</span>
+            <b>Broadcasting is not connected yet</b>
+            <p>Test your camera, microphone and screen in Studio before a streaming provider is enabled.</p>
           </div>
-          <button onClick={() => onView("Studio")}>Set reminder</button>
+          <button onClick={() => onView("Studio")}>Open Studio</button>
         </section>
         <section className="side-list">
           <div className="section-head">
             <h3>Projects need hands</h3>
             <button onClick={() => onView("Projects")}>View all</button>
           </div>
-          {projects.slice(0, 3).map((p) => (
+          {projectPreviews.slice(0, 3).map((p) => (
             <button
               className="side-project"
               key={p.id}
@@ -571,13 +614,14 @@ function Feed({
               </span>
             </button>
           ))}
+          {!projectPreviews.length&&<div className="empty-work"><b>No active projects yet.</b><span>Approved People can propose the first project.</span></div>}
         </section>
         <section className="side-list">
           <div className="section-head">
             <h3>People to meet</h3>
             <button onClick={() => onView("People")}>Browse</button>
           </div>
-          {people.slice(1, 4).map((p) => (
+          {peoplePreviews.slice(0, 3).map((p) => (
             <a
               className="side-person"
               href={`/people/${p.handle.slice(1)}`}
@@ -598,6 +642,7 @@ function Feed({
               <em>View</em>
             </a>
           ))}
+          {!peoplePreviews.length&&<div className="empty-work"><b>No public People yet.</b><span>Approved public profiles will appear here.</span></div>}
         </section>
       </aside>
     </div>
@@ -610,13 +655,13 @@ function FeedLoading(){
   </div>;
 }
 
-function CommunityFeedPost({record}:{record:FeedRecord}){
+function CommunityFeedPost({record,authState,show}:{record:FeedRecord;authState:AuthState;show:(message:string)=>void}){
   const welcome=record.data.kind==="member_welcome";const profilePublic=record.data.profilePublic!==false;const handle=record.author?.avatar_name?`@${record.author.avatar_name}`:String(record.data.handle||"@people");const name=record.author?.display_name||String(record.data.memberName||handle.replace(/^@/,""));const initials=name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();const posted=new Intl.DateTimeFormat("en-ZA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(record.created_at));
-  return <article className={`post ${welcome?"welcome-post":""}`}>
+  return <article className={`post ${welcome?"welcome-post":""}`} id={`community-${record.id}`}>
     <header className="post-head">{profilePublic?<a className="avatar" href={`/people/${handle.replace(/^@/,"")}`}>{initials}</a>:<span className="avatar">{initials}</span>}<span>{profilePublic?<a href={`/people/${handle.replace(/^@/,"")}`}>{name}</a>:<b>{name}</b>}<small>{handle} · {posted}</small></span>{welcome&&<b className="people-badge">NEW PEOPLE MEMBER</b>}</header>
     <h2>{record.title}</h2><p>{String(record.data.body||"")}</p>
     {welcome&&(profilePublic?<nav className="welcome-links" aria-label="New member links"><a href={String(record.data.bioUrl||`/people/${handle.replace(/^@/,"")}#about`)}>Read bio</a><a href={String(record.data.profileUrl||`/people/${handle.replace(/^@/,"")}`)}>Open People page</a><a className="primary" href={String(record.data.shopUrl||`/shops/${handle.replace(/^@/,"")}`)}>Visit shop</a></nav>:<small className="verification-guidance">This member keeps their People profile private.</small>)}
-    <PostActions postId={`community-${record.id}`} show={()=>{}} />
+    <PostActions postId={`community-${record.id}`} authState={authState} show={show} />
   </article>
 }
 
@@ -629,7 +674,7 @@ function PeopleView({
 }) {
   const [remotePeople,setRemotePeople]=useState<Person[]>([]);
   const [directoryState,setDirectoryState]=useState<"loading"|"ready"|"error">("loading");
-  useEffect(()=>{const controller=new AbortController();void fetch("/api/people",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profiles?:Array<{avatar_name:string;display_name?:string;region:string;bio:string;skills?:string[];trust_status:string}>};const mapped=(data.profiles??[]).map((profile,index)=>{const name=profile.display_name||profile.avatar_name;return{name,handle:`@${profile.avatar_name}`,initials:name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase(),region:profile.region,status:profile.trust_status.replaceAll("_"," ").toUpperCase(),color:["#e9b63c","#28a887","#709b48","#cf6e3a","#5a79bd"][index%5],skills:profile.skills??[],bio:profile.bio||"This People member has not added a public biography yet.",projects:0}});setRemotePeople(mapped);setDirectoryState("ready")}).catch(error=>{if(error instanceof DOMException&&error.name==="AbortError")return;setDirectoryState("error")});return()=>controller.abort()},[]);
+  useEffect(()=>{const controller=new AbortController();void fetch("/api/people",{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {profiles?:PublicProfileRow[]};setRemotePeople((data.profiles??[]).map(personFromProfile));setDirectoryState("ready")}).catch(error=>{if(error instanceof DOMException&&error.name==="AbortError")return;setDirectoryState("error")});return()=>controller.abort()},[]);
   const displayMembers=remotePeople.filter(person=>`${person.name} ${person.handle} ${person.region} ${person.skills.join(" ")}`.toLowerCase().includes(search.toLowerCase()));
   return (
     <section className="page-shell">
@@ -691,11 +736,36 @@ function ProjectsView({
   joined,
   onJoin,
   onModal,
+  authState,
 }: {
   joined: string[];
-  onJoin: (p: Project) => void;
+  onJoin: (p: Project) => Promise<void>;
   onModal: (m: Modal) => void;
+  authState:AuthState;
 }) {
+  const [remoteProjects,setRemoteProjects]=useState<Project[]>([]);
+  const [projectState,setProjectState]=useState<"loading"|"ready"|"error">("loading");
+  useEffect(()=>{
+    const controller=new AbortController();
+    let active=true;
+    const refresh=async()=>{
+      try{
+        const [response,taskResponse]=await Promise.all([
+          fetch("/api/community?entity=project",{signal:controller.signal}),
+          fetch("/api/community?entity=task",{signal:controller.signal}),
+        ]);
+        if(!response.ok||!taskResponse.ok)throw new Error();
+        const result=await response.json() as {records?:FeedRecord[]};
+        const taskResult=await taskResponse.json() as {records?:FeedRecord[]};
+        const collaborators=new Map<string,number>();
+        for(const task of taskResult.records??[]){if(task.data.role!=="contributor")continue;const id=String(task.data.projectId||"");if(id)collaborators.set(id,(collaborators.get(id)||0)+1)}
+        if(active){setRemoteProjects((result.records??[]).map((record,index)=>projectFromRecord({...record,data:{...record.data,people:1+(collaborators.get(String(record.id))||0)}},index)));setProjectState("ready")}
+      }catch(error){if(active&&!(error instanceof DOMException&&error.name==="AbortError"))setProjectState("error")}
+    };
+    void refresh();
+    window.addEventListener("fr333man-projects-refresh",refresh);
+    return()=>{active=false;controller.abort();window.removeEventListener("fr333man-projects-refresh",refresh)};
+  },[]);
   return (
     <section className="page-shell">
       <header className="page-title">
@@ -704,12 +774,12 @@ function ProjectsView({
           <h1>Projects with work to do.</h1>
           <span>Open plans, clear tasks and visible stewardship.</span>
         </div>
-        <button className="primary" onClick={() => onModal("project")}>
-          + Propose a project
+        <button className="primary" onClick={() => authState==="signed_in"?onModal("project"):window.location.assign("/onboarding")}>
+          {authState==="signed_in"?"+ Propose a project":"Sign in to propose"}
         </button>
       </header>
       <div className="project-grid">
-        {projects.map((p) => (
+        {remoteProjects.map((p) => (
           <article className="project-card" key={p.id}>
             <div className="project-top" style={{ background: p.accent }}>
               <span>{p.icon}</span>
@@ -738,25 +808,26 @@ function ProjectsView({
                 </span>
               </div>
               <div className="task-list">
-                {p.tasks.map((task, index) => (
-                  <label key={task}>
-                    <input type="checkbox" defaultChecked={index === 0} />
+                {p.tasks.map((task) => (
+                  <div key={task}>
                     <span>{task}</span>
-                  </label>
+                  </div>
                 ))}
               </div>
               <button
                 className={joined.includes(p.id) ? "joined" : "primary"}
-                onClick={() => onJoin(p)}
+                disabled={joined.includes(p.id)}
+                onClick={() => authState==="signed_in"?void onJoin(p):window.location.assign("/onboarding")}
               >
                 {joined.includes(p.id)
                   ? "You are collaborating ✓"
-                  : "Join project"}
+                  : authState==="signed_in"?"Join project":"Sign in to join"}
               </button>
             </div>
           </article>
         ))}
       </div>
+      {!remoteProjects.length&&<div className="empty">{projectState==="loading"?"Loading active projects…":projectState==="error"?"Projects could not be loaded. Please try again.":"No active projects yet. Approved People can propose the first one."}</div>}
     </section>
   );
 }
@@ -861,17 +932,40 @@ function MarketView({
 }
 
 function StudioView({
-  onModal,
   show,
 }: {
-  onModal: (m: Modal) => void;
   show: (s: string) => void;
 }) {
+  const videoRef=useRef<HTMLVideoElement|null>(null);
+  const previewStream=useRef<MediaStream|null>(null);
+  const [cameraLabel,setCameraLabel]=useState("Camera not tested");
+  const [microphoneLabel,setMicrophoneLabel]=useState("Microphone not tested");
+  const [screenLabel,setScreenLabel]=useState("Screen not shared");
+  const attachPreview=async(stream:MediaStream,label:string)=>{
+    previewStream.current?.getTracks().forEach(track=>track.stop());
+    previewStream.current=stream;
+    if(videoRef.current){videoRef.current.srcObject=stream;await videoRef.current.play().catch(()=>undefined)}
+    setCameraLabel(label);
+  };
+  const testCamera=async()=>{
+    try{const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});const label=stream.getVideoTracks()[0]?.label||"Camera connected";await attachPreview(stream,label);show("Camera preview connected")}
+    catch{show("Camera access was not granted or no camera is available")}
+  };
+  const testMicrophone=async()=>{
+    try{const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});const label=stream.getAudioTracks()[0]?.label||"Microphone connected";stream.getTracks().forEach(track=>track.stop());setMicrophoneLabel(label);show("Microphone detected")}
+    catch{show("Microphone access was not granted or no microphone is available")}
+  };
+  const shareScreen=async()=>{
+    try{const stream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});await attachPreview(stream,"Screen preview");setScreenLabel("Screen preview connected");stream.getVideoTracks()[0]?.addEventListener("ended",()=>setScreenLabel("Screen sharing stopped"),{once:true});show("Screen preview connected")}
+    catch{show("Screen sharing was cancelled or unavailable")}
+  };
+  useEffect(()=>()=>previewStream.current?.getTracks().forEach(track=>track.stop()),[]);
   return (
     <section className="studio">
       <div className="studio-stage">
         <div className="live-preview">
           <span>PREVIEW</span>
+          <video ref={videoRef} muted playsInline aria-label="Studio camera or screen preview" />
           <div className="studio-mark">
             <b>
               FR<span>333</span>MAN
@@ -880,54 +974,39 @@ function StudioView({
           </div>
           <footer>
             <i></i>
-            <b>Friday Debrief · 16:20</b>
-            <span>0 watching</span>
+            <b>Local device preview</b>
+            <span>Not broadcasting</span>
           </footer>
         </div>
         <div className="studio-controls">
-          <button onClick={() => show("Camera test passed")}>▣ Camera</button>
-          <button onClick={() => show("DJI Mic input selected")}>
-            ⌁ DJI Mic
+          <button onClick={()=>void testCamera()}>▣ Test camera</button>
+          <button onClick={()=>void testMicrophone()}>
+            ⌁ Test microphone
           </button>
-          <button onClick={() => show("Screen sharing is ready")}>
-            ▤ Share screen
+          <button onClick={()=>void shareScreen()}>
+            ▤ Preview screen
           </button>
-          <button className="go-live" onClick={() => onModal("post")}>
-            Go live
+          <button className="go-live" disabled title="Connect a supported streaming provider before broadcasting">
+            Streaming provider required
           </button>
         </div>
       </div>
       <aside>
-        <p>WEEKLY BROADCAST</p>
+        <p>LIVE STREAM SETUP</p>
         <h1>
-          One idea.
-          <br />A week of conversation.
+          Test locally.
+          <br />Connect before broadcast.
         </h1>
         <ol>
-          <li>
-            <b>Wednesday</b>
-            <span>Publish the 15–30 minute core video.</span>
-          </li>
-          <li>
-            <b>Thursday</b>
-            <span>Post a poll and collect member questions.</span>
-          </li>
-          <li>
-            <b>Friday · 16:20</b>
-            <span>Debrief live with a guest and community Q&amp;A.</span>
-          </li>
-          <li>
-            <b>Weekend</b>
-            <span>Record willing stall visitors and publish short clips.</span>
-          </li>
+          <li><b>1. Camera</b><span>{cameraLabel}</span></li>
+          <li><b>2. Microphone</b><span>{microphoneLabel}</span></li>
+          <li><b>3. Screen</b><span>{screenLabel}</span></li>
+          <li><b>4. Provider</b><span>Not connected. A streaming API and channel credentials are still required.</span></li>
         </ol>
-        <button onClick={() => show("Broadcast destinations opened")}>
-          Manage broadcast destinations
-        </button>
         <div className="equipment">
-          <span>INPUTS</span>
-          <b>Konftel conference camera</b>
-          <b>DJI Mic receiver · USB audio</b>
+          <span>DESTINATIONS</span>
+          <b>No broadcast destination is connected</b>
+          <b>Nothing is sent until a provider is configured</b>
         </div>
       </aside>
     </section>
@@ -1397,68 +1476,96 @@ type FeedComment = {
   id: string;
   author: string;
   body: string;
-  age: string;
-  loves: number;
+  createdAt: string;
 };
-const starterComments: Record<string, FeedComment[]> = {
-  "water-pilot": [
-    { id: "w1", author: "Kabelo Nkosi", body: "I can help confirm transport for Saturday morning.", age: "6 min", loves: 8 },
-    { id: "w2", author: "Thandi Mokoena", body: "Please share the testing checklist before the volunteer briefing.", age: "12 min", loves: 5 },
-    { id: "w3", author: "Lerato Botha", body: "I can document the route and publish the findings.", age: "15 min", loves: 3 },
-  ],
-  "physical-hub": [
-    { id: "h1", author: "Amina Dlamini", body: "The question cards make it easier for new people to join a conversation.", age: "24 min", loves: 11 },
-    { id: "h2", author: "Kabelo Nkosi", body: "Let us add a QR for the current project tasks as well.", age: "41 min", loves: 7 },
-  ],
-  "solar-workshop": [
-    { id: "s1", author: "Francois Kamffer", body: "I will share it with the Randburg project circle.", age: "1 hr", loves: 9 },
-    { id: "s2", author: "Amina Dlamini", body: "A short safety preview would help people know what to expect.", age: "2 hrs", loves: 6 },
-  ],
-};
-function PostActions({ show, postId }: { show: (s: string) => void; postId: string }) {
+type InteractionRecord={id:number;data:Record<string,unknown>;created_at:string;author:{avatar_name:string;display_name:string|null;region:string}|null};
+function PostActions({ show, postId, authState }: { show: (s: string) => void; postId: string;authState:AuthState }) {
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<"Top" | "Newest">("Top");
+  const [filter, setFilter] = useState<"Newest" | "Oldest">("Newest");
   const [loved, setLoved] = useState(false);
-  const [comments, setComments] = useState(starterComments[postId] || []);
+  const [loveCount,setLoveCount]=useState(0);
+  const [ownReactionId,setOwnReactionId]=useState<number|null>(null);
+  const [comments, setComments] = useState<FeedComment[]>([]);
   const [draft, setDraft] = useState("");
-  const visible = [...comments].sort((a, b) =>
-    filter === "Top" ? b.loves - a.loves : b.id.localeCompare(a.id),
-  );
-  const submitComment = (event: FormEvent) => {
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    const controller=new AbortController();
+    let active=true;
+    const load=async()=>{
+      try{
+        const headers=authState==="signed_in"?await authenticatedHeaders():{};
+        const requests:Promise<Response>[]=[
+          fetch(`/api/community?entity=comment&parent=${encodeURIComponent(postId)}`,{signal:controller.signal}),
+          fetch(`/api/community?entity=reaction&parent=${encodeURIComponent(postId)}`,{signal:controller.signal}),
+        ];
+        if(authState==="signed_in")requests.push(fetch(`/api/community?entity=reaction&parent=${encodeURIComponent(postId)}&mine=true`,{headers,signal:controller.signal}));
+        const [commentResponse,reactionResponse,ownResponse]=await Promise.all(requests);
+        if(!active)return;
+        if(commentResponse.ok){const result=await commentResponse.json() as {records?:InteractionRecord[]};setComments((result.records??[]).map(record=>({id:String(record.id),author:record.author?.display_name||record.author?.avatar_name||"People member",body:String(record.data.body||""),createdAt:record.created_at})))}
+        if(reactionResponse.ok){const result=await reactionResponse.json() as {records?:InteractionRecord[]};setLoveCount((result.records??[]).length)}
+        if(ownResponse?.ok){const result=await ownResponse.json() as {records?:InteractionRecord[]};const own=result.records?.[0];setOwnReactionId(own?.id??null);setLoved(Boolean(own))}
+      }finally{if(active)setLoading(false)}
+    };
+    void load().catch(error=>{if(active&&!(error instanceof DOMException&&error.name==="AbortError"))setLoading(false)});
+    return()=>{active=false;controller.abort()};
+  },[authState,postId]);
+  const visible = [...comments].sort((a, b) => filter === "Newest" ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt));
+  const submitComment = async (event: FormEvent) => {
     event.preventDefault();
     const body = draft.trim();
     if (!body) return;
-    setComments((current) => [
-      ...current,
-      { id: `${Date.now()}`, author: "Francois Kamffer", body, age: "now", loves: 0 },
-    ]);
-    setDraft("");
-    setOpen(true);
+    if(authState!=="signed_in"){window.location.assign("/onboarding");return}
+    setBusy(true);
+    try{
+      const response=await fetch("/api/community",{method:"POST",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({entity:"comment",title:body.slice(0,80),data:{parentId:postId,body}})});
+      const result=await response.json() as {id?:number;createdAt?:string;error?:string};
+      if(!response.ok||!result.id)throw new Error(result.error||"Comment could not be saved");
+      setComments(current=>[{id:String(result.id),author:"You",body,createdAt:result.createdAt||new Date().toISOString()},...current]);
+      setDraft("");setOpen(true);show("Comment published");
+    }catch(error){show(error instanceof Error?error.message:"Comment could not be saved")}finally{setBusy(false)}
+  };
+  const toggleLove=async()=>{
+    if(authState!=="signed_in"){window.location.assign("/onboarding");return}
+    setBusy(true);
+    try{
+      if(loved&&ownReactionId){
+        const response=await fetch("/api/community",{method:"PATCH",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({id:ownReactionId,status:"archived"})});
+        const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||"Love could not be removed");
+        setLoved(false);setOwnReactionId(null);setLoveCount(value=>Math.max(0,value-1));show("Love removed");
+      }else{
+        const response=await fetch("/api/community",{method:"POST",headers:{"Content-Type":"application/json",...(await authenticatedHeaders())},body:JSON.stringify({entity:"reaction",title:"Loved a Feed post",data:{parentId:postId,kind:"love"}})});
+        const result=await response.json() as {id?:number;error?:string};if(!response.ok||!result.id)throw new Error(result.error||"Love could not be recorded");
+        setLoved(true);setOwnReactionId(result.id);setLoveCount(value=>value+1);show("Love recorded");
+      }
+    }catch(error){show(error instanceof Error?error.message:"Feed reaction could not be saved")}finally{setBusy(false)}
+  };
+  const sharePost=async()=>{
+    const url=`${window.location.origin}/?post=${encodeURIComponent(postId)}#${encodeURIComponent(postId)}`;
+    if(navigator.share){try{await navigator.share({title:"FR333MAN Feed post",url});return}catch(error){if(error instanceof DOMException&&error.name==="AbortError")return}}
+    try{await navigator.clipboard.writeText(url);show("Post link copied")}catch{show("Your browser blocked copying the post link")}
   };
   return (
     <>
       <footer className="post-actions">
         <button
           className={loved ? "loved" : ""}
-          onClick={() => {
-            setLoved((value) => !value);
-            show(loved ? "Love removed" : "Love recorded");
-          }}
+          disabled={busy||loading}
+          onClick={()=>void toggleLove()}
         >
-          {loved ? "♥" : "♡"} Love
+          {loved ? "♥" : "♡"} Love ({loveCount})
         </button>
         <button onClick={() => setOpen((value) => !value)}>
           ◯ Comment ({comments.length})
         </button>
-        <button onClick={() => show("Post link copied")}>⌁ Share</button>
-        <button onClick={() => show("Support opened")}>✦ Support</button>
+        <button onClick={()=>void sharePost()}>⌁ Share</button>
       </footer>
       {open && (
         <section className="comment-panel" aria-label="Post comments">
           <header>
             <b>Comments</b>
             <div aria-label="Filter comments">
-              {(["Top", "Newest"] as const).map((option) => (
+              {(["Newest", "Oldest"] as const).map((option) => (
                 <button
                   className={filter === option ? "active" : ""}
                   onClick={() => setFilter(option)}
@@ -1476,10 +1583,11 @@ function PostActions({ show, postId }: { show: (s: string) => void; postId: stri
                 <div>
                   <b>{comment.author}</b>
                   <p>{comment.body}</p>
-                  <small>{comment.age} · ♥ {comment.loves}</small>
+                  <small>{new Intl.DateTimeFormat("en-ZA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(comment.createdAt))}</small>
                 </div>
               </article>
             ))}
+            {!loading&&!visible.length&&<div className="empty-work"><b>No comments yet.</b><span>Start a useful conversation.</span></div>}
           </div>
           <form onSubmit={submitComment}>
             <input
@@ -1488,7 +1596,7 @@ function PostActions({ show, postId }: { show: (s: string) => void; postId: stri
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Write a useful comment…"
             />
-            <button disabled={!draft.trim()}>Comment</button>
+            <button disabled={!draft.trim()||busy}>{busy?"Saving…":"Comment"}</button>
           </form>
         </section>
       )}

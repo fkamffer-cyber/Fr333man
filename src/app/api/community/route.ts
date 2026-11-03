@@ -11,8 +11,11 @@ const contentEntities = new Set([
   "consent",
   "dispute",
   "broadcast",
+  "comment",
+  "reaction",
 ]);
 const statuses = new Set(["draft", "active", "pending_review", "archived"]);
+const interactionEntities = new Set(["comment", "reaction"]);
 
 function text(value: unknown, max = 180) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -49,6 +52,24 @@ async function removeVerificationFiles(
 ) {
   if (!paths.length) return;
   await admin.storage.from("private-vault").remove(paths);
+}
+
+async function feedPostExists(
+  admin: ReturnType<typeof serviceSupabase>,
+  parentId: string,
+) {
+  const match = /^community-([1-9][0-9]*)$/.exec(parentId);
+  const id = match ? Number(match[1]) : 0;
+  if (!Number.isSafeInteger(id) || id < 1) return false;
+  const { data, error } = await admin
+    .from("community_records")
+    .select("id")
+    .eq("id", id)
+    .eq("entity", "post")
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
 }
 
 function onboardingFailure(error: { message?: string; code?: string } | null) {
@@ -145,6 +166,13 @@ export async function GET(req: Request) {
     if (entity && !contentEntities.has(entity)) {
       return Response.json({ error: "Unsupported record type" }, { status: 400 });
     }
+    const parent = text(url.searchParams.get("parent"), 120);
+    if (parent && (!entity || !interactionEntities.has(entity))) {
+      return Response.json(
+        { error: "Parent filters are supported only for comments and reactions" },
+        { status: 400 },
+      );
+    }
     const mine = url.searchParams.get("mine") === "true";
     const auth = mine ? await authenticatedSupabase(req) : null;
     if (mine && !auth) {
@@ -158,6 +186,7 @@ export async function GET(req: Request) {
       .order("created_at", { ascending: false })
       .limit(100);
     if (entity) query = query.eq("entity", entity);
+    if (parent) query = query.eq("data->>parentId", parent);
     if (mine && auth) query = query.eq("owner_id", auth.user.id);
     const { data, error } = await query;
     if (error) throw error;
@@ -400,6 +429,69 @@ export async function POST(req: Request) {
         id: created.id,
         code: metadata.claimCode,
       });
+    }
+
+    if (entity === "comment") {
+      const parentId = text(data.parentId, 120);
+      const bodyText = text(data.body, 1000);
+      if (!parentId || !bodyText) {
+        return Response.json(
+          { error: "A Feed post and comment are required" },
+          { status: 400 },
+        );
+      }
+      if (!(await feedPostExists(admin, parentId))) {
+        return Response.json({ error: "Feed post not found" }, { status: 404 });
+      }
+      const { data: created, error } = await admin
+        .from("community_records")
+        .insert({
+          entity,
+          owner_id: auth.user.id,
+          title: title || "Feed comment",
+          data: { parentId, body: bodyText },
+          status: "active",
+        })
+        .select("id,created_at")
+        .single();
+      if (error) throw error;
+      return Response.json({ ok: true, id: created.id, createdAt: created.created_at });
+    }
+
+    if (entity === "reaction") {
+      const parentId = text(data.parentId, 120);
+      if (!parentId || data.kind !== "love") {
+        return Response.json(
+          { error: "A valid Feed reaction is required" },
+          { status: 400 },
+        );
+      }
+      if (!(await feedPostExists(admin, parentId))) {
+        return Response.json({ error: "Feed post not found" }, { status: 404 });
+      }
+      const { data: existing, error: existingError } = await admin
+        .from("community_records")
+        .select("id")
+        .eq("entity", "reaction")
+        .eq("owner_id", auth.user.id)
+        .eq("status", "active")
+        .contains("data", { parentId, kind: "love" })
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if (existing) return Response.json({ ok: true, id: existing.id, active: true });
+      const { data: created, error } = await admin
+        .from("community_records")
+        .insert({
+          entity,
+          owner_id: auth.user.id,
+          title: "Loved a Feed post",
+          data: { parentId, kind: "love" },
+          status: "active",
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return Response.json({ ok: true, id: created.id, active: true });
     }
 
     if (!contentEntities.has(entity)) {
