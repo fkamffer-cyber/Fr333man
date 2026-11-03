@@ -1,5 +1,16 @@
 # FR333MAN releases
 
+## v0.30.0 — Sites release 30 — 2026-11-03
+
+- Corrected ZAR product prices so major currency values are stored as cents exactly once.
+- Added regression tests for South African currency formats.
+- Changed Marketplace publication to require steward compliance approval for new products.
+- Removed public sample-product fallback from direct product URLs.
+- Synchronized the deployment migrations with the transactional onboarding and profile-visibility repairs.
+- Applied the Peopleship terminology migration and documented the one-time first-steward bootstrap.
+- Removed sample project assignments from People profile pages.
+- Upgraded the production framework to a patched release and refreshed deployment verification.
+
 ## v0.29.0 — Sites release 29 — 2026-10-28
 
 - Replaced the free-text onboarding questionnaire with ten multiple-choice questions.

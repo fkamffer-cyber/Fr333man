@@ -1,6 +1,6 @@
 # FR333MAN deployment package
 
-Current application release: **v0.29.0**. Every production publish must bump the package version and add a matching entry to `CHANGELOG.md`.
+Current application release: **v0.30.0**. Every production publish must bump the package version and add a matching entry to `CHANGELOG.md`.
 
 FR333MAN is a Next.js people platform with profiles, projects, products, invitation drafts, onboarding, private credential uploads, inventory administration, a multichannel advert-approval and buyer-follow-up desk, and a supervised Paystack checkout entry point. Supabase supplies authentication, Postgres data, row-level security, and private file storage.
 

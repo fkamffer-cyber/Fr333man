@@ -1,5 +1,5 @@
 export const release = {
-  label: "v0.29.0",
-  hostedVersion: 29,
-  date: "2026-10-28",
+  label: "v0.30.0",
+  hostedVersion: 30,
+  date: "2026-11-03",
 } as const;

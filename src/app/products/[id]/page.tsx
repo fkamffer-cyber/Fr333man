@@ -1,11 +1,10 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { products } from "@/app/platform-data";
 import {findPublicProduct} from "@/lib/public-directory";
 
 export default async function ProductListing({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const product = await findPublicProduct(id) ?? products.find((item) => item.id === id);
+  const product = await findPublicProduct(id);
   if (!product) notFound();
 
   return (

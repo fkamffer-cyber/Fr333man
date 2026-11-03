@@ -23,4 +23,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
+      - run: pnpm exec tsc --noEmit --pretty false
+      - run: pnpm run qa:marketplace
       - run: pnpm run build:vercel

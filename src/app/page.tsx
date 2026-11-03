@@ -997,17 +997,7 @@ function MyPage({
               <h2>Projects</h2>
               <button onClick={() => setView("Projects")}>Manage</button>
             </div>
-            {projects.slice(0, 2).map((p) => (
-              <div className="profile-project" key={p.id}>
-                <i style={{ background: p.accent }}>{p.icon}</i>
-                <span>
-                  <b>{p.title}</b>
-                  <small>
-                    {p.openTasks} open tasks · {p.progress}% complete
-                  </small>
-                </span>
-              </div>
-            ))}
+            <div className="empty-work"><b>No projects linked to this profile yet.</b><span>Joined and created projects will appear here once project membership is stored.</span></div>
           </article>
           <article className="profile-section">
             <div className="section-head">

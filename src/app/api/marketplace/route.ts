@@ -1,5 +1,6 @@
 import {authenticatedSupabase, publicSupabase, serviceSupabase} from '@/lib/supabase-server';
 import {rejectCrossOrigin} from '@/lib/http';
+import {parseMajorCurrencyToMinor} from '@/lib/money';
 
 const allowedConditions=new Set(['new','used','refurbished','digital','service']);
 const sellerStatuses=new Set(['draft','published','paused','sold_out','archived']);
@@ -8,11 +9,7 @@ const text=(value:unknown,max=500)=>typeof value==='string'?value.trim().slice(0
 const boolean=(value:unknown)=>value===true||value==='true'||value==='on'||value===1;
 const slugify=(value:string)=>value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,70)||'item';
 const unavailable=()=>Response.json({error:'Marketplace storage is temporarily unavailable'},{status:503});
-function priceAmount(value:unknown){
-  if(typeof value==='number'&&Number.isFinite(value))return Math.max(0,Math.round(value));
-  const cleaned=text(value,40).replace(/[^0-9.,]/g,'').replace(',','.');const parsed=Number.parseFloat(cleaned);
-  return Number.isFinite(parsed)?Math.max(0,Math.round(parsed*100)):NaN;
-}
+function minorAmount(value:unknown){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>=0?Math.round(parsed):NaN}
 function mark(name:string){return name.split(/\s+/).map(word=>word[0]).join('').slice(0,4).toUpperCase()}
 function list(value:unknown,maxItems=20,maxLength=80){const items=Array.isArray(value)?value:typeof value==='string'?value.split(','):[];return items.map(item=>text(item,maxLength)).filter(Boolean).slice(0,maxItems)}
 function publicImageUrl(path:string){const base=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'');return base?`${base}/storage/v1/object/public/product-media/${path.split('/').map(encodeURIComponent).join('/')}`:''}
@@ -51,7 +48,7 @@ export async function POST(req:Request){
     const {data:shop,error:shopError}=await admin.from('shops').upsert({owner_id:auth.user.id,slug:shopSlug,name:shopName,description:text(body.shopDescription,1000),region:profile.region||'Randburg',fulfilment_note:text(body.fulfilmentNote,500),returns_note:text(body.returnsNote,500),status:'active'},{onConflict:'owner_id'}).select('id,slug,name').single();if(shopError)throw shopError;
     if(action==='shop-upsert')return Response.json({ok:true,shop});
     if(action!=='product-create')return Response.json({error:'Unsupported marketplace action'},{status:400});
-    const name=text(body.name||body.title,140);const description=text(body.description,3000);const category=text(body.category,80);const condition=allowedConditions.has(text(body.condition,30))?text(body.condition,30):'new';const amount=priceAmount(body.priceAmount??body.price);const stock=Math.max(0,Math.floor(Number(body.stock)||0));const availability=new Set(['single_item','in_stock','out_of_stock']).has(text(body.availability,30))?text(body.availability,30):stock===1?'single_item':stock>1?'in_stock':'out_of_stock';
+    const name=text(body.name||body.title,140);const description=text(body.description,3000);const category=text(body.category,80);const condition=allowedConditions.has(text(body.condition,30))?text(body.condition,30):'new';const amount=body.price!==undefined?parseMajorCurrencyToMinor(body.price):minorAmount(body.priceAmount);const stock=Math.max(0,Math.floor(Number(body.stock)||0));const availability=new Set(['single_item','in_stock','out_of_stock']).has(text(body.availability,30))?text(body.availability,30):stock===1?'single_item':stock>1?'in_stock':'out_of_stock';
     if(name.length<3||description.length<10||!category||!Number.isFinite(amount))return Response.json({error:'Name, description, category and a valid price are required'},{status:400});
     const slug=`${slugify(name)}-${crypto.randomUUID().slice(0,8)}`;
     const {data:product,error}=await admin.from('products').insert({shop_id:shop.id,owner_id:auth.user.id,slug,sku:text(body.sku,80)||null,name,description,category,subcategory:text(body.subcategory,100),brand:text(body.brand,100),model:text(body.model,100),gtin:text(body.gtin,80),tags:list(body.tags),availability,listing_location:text(body.listingLocation,160)||profile.region||'Randburg',delivery_options:list(body.deliveryOptions,4,30),condition,price_amount:amount,currency:'ZAR',stock,membership_eligible:boolean(body.membershipEligible),compliance_status:'pending_review',status:'draft'}).select('id,slug,status').single();if(error)throw error;
@@ -62,8 +59,37 @@ export async function POST(req:Request){
 export async function PATCH(req:Request){
   const originError=rejectCrossOrigin(req);if(originError)return originError;
   try{
-    const auth=await authenticatedSupabase(req);if(!auth)return Response.json({error:'Sign in before editing a product'},{status:401});const body=await req.json() as Record<string,unknown>;const id=text(body.id,90);if(!idPattern.test(id))return Response.json({error:'Valid product id is required'},{status:400});
-    const updates:Record<string,unknown>={updated_at:new Date().toISOString()};if(body.name!==undefined){const name=text(body.name,140);if(name.length<3)return Response.json({error:'Product name must be at least 3 characters'},{status:400});updates.name=name}if(body.description!==undefined){const description=text(body.description,3000);if(description.length<10)return Response.json({error:'Product description must be at least 10 characters'},{status:400});updates.description=description}if(body.category!==undefined){const category=text(body.category,80);if(!category)return Response.json({error:'Product category is required'},{status:400});updates.category=category}if(body.subcategory!==undefined)updates.subcategory=text(body.subcategory,100);if(body.brand!==undefined)updates.brand=text(body.brand,100);if(body.model!==undefined)updates.model=text(body.model,100);if(body.gtin!==undefined)updates.gtin=text(body.gtin,80);if(body.tags!==undefined)updates.tags=list(body.tags);if(body.availability!==undefined){const availability=text(body.availability,30);if(!new Set(['single_item','in_stock','out_of_stock']).has(availability))return Response.json({error:'Unsupported availability'},{status:400});updates.availability=availability}if(body.listingLocation!==undefined)updates.listing_location=text(body.listingLocation,160);if(body.deliveryOptions!==undefined)updates.delivery_options=list(body.deliveryOptions,4,30);if(body.sku!==undefined)updates.sku=text(body.sku,80)||null;if(body.condition!==undefined){const condition=text(body.condition,30);if(!allowedConditions.has(condition))return Response.json({error:'Unsupported product condition'},{status:400});updates.condition=condition}if(body.stock!==undefined){const stock=Number(body.stock);if(!Number.isFinite(stock)||stock<0)return Response.json({error:'Stock must be zero or greater'},{status:400});updates.stock=Math.floor(stock)}if(body.price!==undefined){const amount=priceAmount(body.price);if(!Number.isFinite(amount))return Response.json({error:'Valid price required'},{status:400});updates.price_amount=amount}if(body.status!==undefined){const status=text(body.status,30);if(!sellerStatuses.has(status))return Response.json({error:'Unsupported product status'},{status:400});if(status==='published'){if(body.acceptedRules!==true)return Response.json({error:'Confirm the Marketplace rules before publishing'},{status:400});updates.compliance_status='permitted'}updates.status=status}if(body.membershipEligible!==undefined)updates.membership_eligible=boolean(body.membershipEligible);if(Object.keys(updates).length===1)return Response.json({error:'No supported product changes supplied'},{status:400});
-    const {data,error}=await serviceSupabase().from('products').update(updates).eq('owner_id',auth.user.id).or(`id.eq.${id},slug.eq.${id}`).select('id,slug,status').maybeSingle();if(error)throw error;if(!data)return Response.json({error:'Product not found'},{status:404});return Response.json({ok:true,product:data});
+    const auth=await authenticatedSupabase(req);if(!auth)return Response.json({error:'Sign in before editing a product'},{status:401});
+    const body=await req.json() as Record<string,unknown>;const id=text(body.id,90);if(!idPattern.test(id))return Response.json({error:'Valid product id is required'},{status:400});
+    const admin=serviceSupabase();
+    const updates:Record<string,unknown>={updated_at:new Date().toISOString()};
+    if(body.name!==undefined){const name=text(body.name,140);if(name.length<3)return Response.json({error:'Product name must be at least 3 characters'},{status:400});updates.name=name}
+    if(body.description!==undefined){const description=text(body.description,3000);if(description.length<10)return Response.json({error:'Product description must be at least 10 characters'},{status:400});updates.description=description}
+    if(body.category!==undefined){const category=text(body.category,80);if(!category)return Response.json({error:'Product category is required'},{status:400});updates.category=category}
+    if(body.subcategory!==undefined)updates.subcategory=text(body.subcategory,100);
+    if(body.brand!==undefined)updates.brand=text(body.brand,100);
+    if(body.model!==undefined)updates.model=text(body.model,100);
+    if(body.gtin!==undefined)updates.gtin=text(body.gtin,80);
+    if(body.tags!==undefined)updates.tags=list(body.tags);
+    if(body.availability!==undefined){const availability=text(body.availability,30);if(!new Set(['single_item','in_stock','out_of_stock']).has(availability))return Response.json({error:'Unsupported availability'},{status:400});updates.availability=availability}
+    if(body.listingLocation!==undefined)updates.listing_location=text(body.listingLocation,160);
+    if(body.deliveryOptions!==undefined)updates.delivery_options=list(body.deliveryOptions,4,30);
+    if(body.sku!==undefined)updates.sku=text(body.sku,80)||null;
+    if(body.condition!==undefined){const condition=text(body.condition,30);if(!allowedConditions.has(condition))return Response.json({error:'Unsupported product condition'},{status:400});updates.condition=condition}
+    if(body.stock!==undefined){const stock=Number(body.stock);if(!Number.isFinite(stock)||stock<0)return Response.json({error:'Stock must be zero or greater'},{status:400});updates.stock=Math.floor(stock)}
+    if(body.price!==undefined){const amount=parseMajorCurrencyToMinor(body.price);if(!Number.isFinite(amount))return Response.json({error:'Valid price required'},{status:400});updates.price_amount=amount}
+    if(body.status!==undefined){
+      const status=text(body.status,30);if(!sellerStatuses.has(status))return Response.json({error:'Unsupported product status'},{status:400});
+      if(status==='published'){
+        if(body.acceptedRules!==true)return Response.json({error:'Confirm the Marketplace rules before publishing'},{status:400});
+        const {data:existing,error:readError}=await admin.from('products').select('compliance_status').eq('owner_id',auth.user.id).or(`id.eq.${id},slug.eq.${id}`).maybeSingle();
+        if(readError)throw readError;if(!existing)return Response.json({error:'Product not found'},{status:404});
+        updates.status=existing.compliance_status==='permitted'?'published':'pending_review';
+      }else updates.status=status;
+    }
+    if(body.membershipEligible!==undefined)updates.membership_eligible=boolean(body.membershipEligible);
+    if(Object.keys(updates).length===1)return Response.json({error:'No supported product changes supplied'},{status:400});
+    const {data,error}=await admin.from('products').update(updates).eq('owner_id',auth.user.id).or(`id.eq.${id},slug.eq.${id}`).select('id,slug,status,compliance_status').maybeSingle();
+    if(error)throw error;if(!data)return Response.json({error:'Product not found'},{status:404});return Response.json({ok:true,product:data});
   }catch{return unavailable()}
 }
