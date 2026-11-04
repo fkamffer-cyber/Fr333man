@@ -1,5 +1,11 @@
 # FR333MAN releases
 
+## v0.31.2 — Sites release 34 — 2026-11-04
+
+- Enabled the provisioned Google OAuth entry point for People onboarding on both hosted deployments.
+- Kept an explicit `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false` emergency rollback without requiring every host to duplicate the enabled default.
+- Preserved Facebook and LinkedIn as hidden until their provider identity-verification requirements are completed.
+
 ## v0.31.1 — Sites release 33 — 2026-11-04
 
 - Repaired signed-out invitation creation so a reviewed draft always produces a working shareable claim link.

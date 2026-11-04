@@ -206,7 +206,10 @@ const clearRequestedResumeStep = () => {
 };
 
 export default function OnboardingWizard() {
-  const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
+  // Google is provisioned for the production Supabase project. Keep an explicit
+  // false override for emergency rollback without hiding a working provider by
+  // default on hosts that have not copied the optional public feature flag.
+  const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED !== "false";
   const facebookEnabled =
     process.env.NEXT_PUBLIC_FACEBOOK_AUTH_ENABLED === "true";
   const linkedinEnabled =
