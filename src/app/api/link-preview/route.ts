@@ -1,4 +1,5 @@
 import { rejectCrossOrigin } from "@/lib/http";
+import { inferredInvitationName } from "@/lib/invitations";
 
 type Preview = {
   title: string;
@@ -102,27 +103,7 @@ function meta(html: string, key: string) {
 }
 
 function fallbackTitle(url: URL, source: string) {
-  const segments = url.pathname
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => decodeURIComponent(segment));
-  const facebookHandle =
-    source === "Facebook" &&
-    segments[0] &&
-    !facebookReservedPaths.has(segments[0].toLowerCase())
-      ? segments[0]
-      : "";
-  const linkedInHandle =
-    source === "LinkedIn" && ["in", "company", "school"].includes(segments[0])
-      ? segments[1] || ""
-      : "";
-  const segment = facebookHandle || linkedInHandle || segments.at(-1) || "";
-  const readable = segment.replace(/[-_.]+/g, " ").trim();
-  return readable
-    ? source === "Facebook" || source === "LinkedIn"
-      ? `${readable} on ${source}`
-      : readable
-    : `${source} profile`;
+  return inferredInvitationName(url.toString(), source);
 }
 
 function facebookPageHandle(url: URL) {

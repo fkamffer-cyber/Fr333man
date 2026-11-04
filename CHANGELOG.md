@@ -1,5 +1,11 @@
 # FR333MAN releases
 
+## v0.31.4 — Sites release 36 — 2026-11-04
+
+- Made restricted Facebook and LinkedIn links produce clean, editable profile names instead of platform-labelled placeholders.
+- Added authenticated profile-photo upload for invitation drafts when a social platform withholds its public image.
+- Kept the import status explicit so inferred, uploaded and platform-returned data cannot be confused.
+
 ## v0.31.3 — Sites release 35 — 2026-11-04
 
 - Repaired hosted Supabase initialization by loading the public project URL and publishable key from the deployment runtime before the client application starts.

@@ -39,6 +39,8 @@ export default function InviteDesk({
   const [inviteCode, setInviteCode] = useState("");
   const [createError, setCreateError] = useState("");
   const [trackingNotice, setTrackingNotice] = useState("");
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageNotice, setImageNotice] = useState("");
   const inspect = async () => {
     setLoading(true);
     try {
@@ -70,6 +72,36 @@ export default function InviteDesk({
       );
     } finally {
       setLoading(false);
+    }
+  };
+  const uploadImage = async (file?: File) => {
+    if (!file) return;
+    setImageBusy(true);
+    setImageNotice("");
+    try {
+      const headers = await authenticatedHeaders();
+      if (!headers.Authorization)
+        throw new Error("Sign in before uploading a profile photo");
+      const form = new FormData();
+      form.set("file", file);
+      const response = await fetch("/api/invitation-upload", {
+        method: "POST",
+        headers,
+        body: form,
+      });
+      const result = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || !result.url)
+        throw new Error(result.error || "Profile photo could not be uploaded");
+      setImage(result.url);
+      setImageNotice("Photo uploaded and attached to this invitation draft.");
+      show("Invitation profile photo uploaded");
+    } catch (error) {
+      const problem =
+        error instanceof Error ? error.message : "Profile photo could not be uploaded";
+      setImageNotice(problem);
+      show(problem);
+    } finally {
+      setImageBusy(false);
     }
   };
   const create = async (event: FormEvent) => {
@@ -239,7 +271,11 @@ export default function InviteDesk({
                 <span>
                   {preview.imported?.name ? "Name imported" : "Name inferred from link"}
                   {" · "}
-                  {preview.imported?.image ? "Photo imported" : "Photo not returned"}
+                  {preview.imported?.image
+                    ? "Photo imported"
+                    : image
+                      ? "Photo added for review"
+                      : "Photo not returned"}
                   {" · "}
                   {preview.imported?.description
                     ? "Biography imported"
@@ -261,6 +297,21 @@ export default function InviteDesk({
                   onChange={(e) => setName(e.target.value)}
                   required
                 />
+              </label>
+              <label>
+                Add a profile photo from this device
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={imageBusy}
+                  onChange={(event) => void uploadImage(event.currentTarget.files?.[0])}
+                />
+                <small>
+                  {imageBusy
+                    ? "Uploading photo…"
+                    : imageNotice ||
+                      "Use a source-checked photo when the social platform blocks its public preview."}
+                </small>
               </label>
               <label>
                 Public profile image link (optional)

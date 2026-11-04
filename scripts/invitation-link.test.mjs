@@ -4,6 +4,7 @@ import {
   decodePortableInvitation,
   encodePortableInvitation,
   portableInvitationPath,
+  inferredInvitationName,
 } from "../src/lib/invitations.ts";
 
 const invitation = {
@@ -28,4 +29,21 @@ test("portable invitation links round-trip Unicode profile data", () => {
 
 test("invalid portable invitation data is rejected", () => {
   assert.equal(decodePortableInvitation("not-valid-json"), null);
+});
+
+test("social profile links produce useful editable names when previews are blocked", () => {
+  assert.equal(
+    inferredInvitationName(
+      "https://www.facebook.com/kwaai.lappies.7",
+      "Facebook",
+    ),
+    "kwaai lappies 7",
+  );
+  assert.equal(
+    inferredInvitationName(
+      "https://www.linkedin.com/in/jane-example",
+      "LinkedIn",
+    ),
+    "jane example",
+  );
 });

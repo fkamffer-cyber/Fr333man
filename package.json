@@ -1,6 +1,6 @@
 {
   "name": "sites-project",
-  "version": "0.31.3",
+  "version": "0.31.4",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -14,6 +14,7 @@
     "qa:onboarding": "node scripts/verify-onboarding.mjs",
     "qa:invitation": "node scripts/verify-invitation.mjs",
     "qa:invite-link": "node --experimental-strip-types --test scripts/invitation-link.test.mjs",
+    "qa:invitation-media": "node --experimental-strip-types --test scripts/invitation-media.test.mjs",
     "qa:connected-profile": "node --experimental-strip-types --test scripts/connected-profile.test.mjs",
     "qa:marketplace": "node --experimental-strip-types --test scripts/marketplace-money.test.mjs"
   },
