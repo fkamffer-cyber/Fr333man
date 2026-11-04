@@ -50,7 +50,7 @@ No package in the final dependency list requires a persistent process, local fil
 
 ## External go-live items
 
-1. Apply the migration, configure Google/Apple/SMS Auth providers, and set exact redirect URLs.
+1. Configure the approved Google, Facebook, LinkedIn OIDC, Apple, Microsoft and/or SMS Auth providers, then set exact redirect URLs for localhost, Vercel, Sites and the production domain.
 2. Sign in with `PLATFORM_OWNER_EMAIL`; that account is the bootstrap steward. Then test anonymous/member/steward access separately.
 3. Complete Paystack merchant verification, create the approved monthly plan and configure the signed membership webhook before enabling recurring billing.
 4. Select a specialist identity/liveness provider and complete a POPIA impact assessment, retention/deletion rules, reviewer training, and explicit biometric consent. This package stores uploaded evidence privately but does not perform biometric matching.

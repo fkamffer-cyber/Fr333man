@@ -2,6 +2,10 @@
 /* eslint-disable @next/next/no-img-element -- invite previews use reviewed public image hosts that are not known at build time */
 
 import { FormEvent, useState } from "react";
+import {
+  portableInvitationPath,
+  type PortableInvitationData,
+} from "@/lib/invitations";
 import { authenticatedHeaders } from "./lib/supabase-browser";
 type Preview = {
   title: string;
@@ -11,6 +15,11 @@ type Preview = {
   source: string;
   limited?: boolean;
   notice?: string;
+  imported?: {
+    name: boolean;
+    description: boolean;
+    image: boolean;
+  };
 };
 export default function InviteDesk({
   show,
@@ -50,7 +59,7 @@ export default function InviteDesk({
       setTrackingNotice("");
       show(
         result.limited
-          ? `${result.source} supplied limited details; review and complete the draft`
+          ? `${result.source} did not return a complete public profile; complete the marked fields below`
           : "Public page image and details are ready for your review",
       );
     } catch (error) {
@@ -68,7 +77,7 @@ export default function InviteDesk({
     if (!preview) return;
     setCreateError("");
     setTrackingNotice("");
-    const invitationData = {
+    const invitationData: PortableInvitationData = {
       name: name.trim().slice(0, 120),
       message: message.trim().slice(0, 500),
       sourceUrl: preview.url,
@@ -77,12 +86,21 @@ export default function InviteDesk({
       image: image.trim().slice(0, 2048),
       claimed: false,
     };
+    const createPortableInvite = (notice: string) => {
+      setInvite(
+        `${window.location.origin}${portableInvitationPath(invitationData)}`,
+      );
+      setInviteCode("");
+      setTrackingNotice(notice);
+    };
     try {
       const authHeaders = await authenticatedHeaders();
       if (!authHeaders.Authorization) {
-        throw new Error(
-          "Sign in as a FR333MAN member before creating a tracked invitation.",
+        createPortableInvite(
+          "This shareable claim link works immediately. Sign in before creating an invitation only when you also need a member tracking code.",
         );
+        show("Shareable invitation created");
+        return;
       }
       const response = await fetch("/api/community", {
         method: "POST",
@@ -104,18 +122,13 @@ export default function InviteDesk({
       const invitationId = String(result.id ?? "");
       const code = String(result.code || "").toUpperCase();
       if (!response.ok || !invitationId) {
-        if (response.status >= 500) {
-          const bytes = new TextEncoder().encode(JSON.stringify(invitationData));
-          const encoded = btoa(String.fromCharCode(...bytes))
-            .replace(/\+/g, "-")
-            .replace(/\//g, "_")
-            .replace(/=+$/g, "");
-          setInvite(`${window.location.origin}/invite/draft#data=${encoded}`);
-          setInviteCode("");
-          setTrackingNotice(
-            "Supabase invitation tracking is not connected on this release. This portable claim link works, but it has no tracked invitation code.",
+        if (response.status === 401 || response.status >= 500) {
+          createPortableInvite(
+            response.status === 401
+              ? "Your session could not be used for tracking, but this shareable claim link works immediately. Sign in again before creating one when you need a tracking code."
+              : "Invitation tracking is temporarily unavailable, but this shareable claim link works immediately and can still be claimed.",
           );
-          show("Portable invitation created; tracking is not connected");
+          show("Shareable invitation created");
           return;
         }
         throw new Error(result.error || "The invitation could not be saved.");
@@ -214,6 +227,33 @@ export default function InviteDesk({
                   </a>
                 </span>
               </div>
+              <div
+                className={`invite-import-status${preview.limited ? " is-limited" : ""}`}
+                role="status"
+              >
+                <b>
+                  {preview.limited
+                    ? `${preview.source} restricted this profile preview`
+                    : "Public profile details imported"}
+                </b>
+                <span>
+                  {preview.imported?.name ? "Name imported" : "Name inferred from link"}
+                  {" · "}
+                  {preview.imported?.image ? "Photo imported" : "Photo not returned"}
+                  {" · "}
+                  {preview.imported?.description
+                    ? "Biography imported"
+                    : "Biography not returned"}
+                </span>
+                {preview.limited && (
+                  <p>
+                    FR333MAN can import only what the public link exposes. It
+                    cannot use your signed-in social session to copy another
+                    person&apos;s account. Review the source, then complete the
+                    photo link and summary below before sharing.
+                  </p>
+                )}
+              </div>
               <label>
                 Profile display name
                 <input
@@ -231,9 +271,9 @@ export default function InviteDesk({
                   placeholder="https://…"
                 />
                 <small>
-                  Facebook personal profiles may withhold their photo. You can
-                  paste a public image link after confirming it belongs to the
-                  invited person.
+                  Some social platforms withhold profile photos. You can paste
+                  a public image link after confirming it belongs to the invited
+                  person.
                 </small>
               </label>
               <label>

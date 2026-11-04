@@ -1,7 +1,12 @@
 "use client";
-/* eslint-disable @next/next/no-html-link-for-pages -- onboarding uses full navigation around authentication */
+/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- onboarding uses full navigation around authentication and consented provider photos */
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  connectedProfile,
+  providerName,
+  type ConnectedUser,
+} from "@/lib/connected-profile";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
 import { release } from "./release";
 
@@ -92,6 +97,10 @@ const resumeStorageKey = "fr333man-onboarding-resume-step";
 const answerIsComplete = (answer: string) => answer.trim().length >= 10;
 type Draft = {
   avatar: string;
+  displayName: string;
+  avatarUrl: string;
+  sourceProvider: string;
+  profileReviewed: boolean;
   region: string;
   memberType: string;
   email: string;
@@ -121,6 +130,10 @@ type Completion = {
 const defaultProfileUrl = "/?view=My%20page&onboarding=submitted";
 const initial: Draft = {
   avatar: "",
+  displayName: "",
+  avatarUrl: "",
+  sourceProvider: "",
+  profileReviewed: false,
   region: "Randburg",
   memberType: "profile",
   email: "",
@@ -134,6 +147,13 @@ const initial: Draft = {
   privacy: false,
   fee: false,
 };
+
+type EntryProvider =
+  | "google"
+  | "facebook"
+  | "linkedin_oidc"
+  | "apple"
+  | "azure";
 
 const readSavedDraft = (): Draft | null => {
   try {
@@ -156,7 +176,7 @@ const readSavedDraft = (): Draft | null => {
 
 const resumeStepFor = (draft: Draft) => {
   if (draft.answers.every(answerIsComplete)) return 4;
-  if (draft.avatar.trim() && draft.region.trim()) return 3;
+  if (draft.profileReviewed && draft.avatar.trim() && draft.region.trim()) return 3;
   return 2;
 };
 
@@ -187,7 +207,13 @@ const clearRequestedResumeStep = () => {
 
 export default function OnboardingWizard() {
   const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
+  const facebookEnabled =
+    process.env.NEXT_PUBLIC_FACEBOOK_AUTH_ENABLED === "true";
+  const linkedinEnabled =
+    process.env.NEXT_PUBLIC_LINKEDIN_AUTH_ENABLED === "true";
   const appleEnabled = process.env.NEXT_PUBLIC_APPLE_AUTH_ENABLED === "true";
+  const microsoftEnabled =
+    process.env.NEXT_PUBLIC_MICROSOFT_AUTH_ENABLED === "true";
   const phoneEnabled = process.env.NEXT_PUBLIC_PHONE_AUTH_ENABLED === "true";
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Draft>(initial);
@@ -266,9 +292,10 @@ export default function OnboardingWizard() {
         return false;
       }
     };
-    const acceptSession = (email?: string) => {
+    const acceptSession = (user: ConnectedUser) => {
       if (!active) return;
-      const accountEmail = email?.trim() || "your account";
+      const profile = connectedProfile(user);
+      const accountName = profile.email || profile.phone || "your account";
       const savedDraft = readSavedDraft();
       const recovered = savedDraft || initial;
       const requestedStep = Math.max(
@@ -276,14 +303,21 @@ export default function OnboardingWizard() {
         readRequestedResumeStep(),
       );
       setAuthStatus("signed-in");
-      setSignedInAccount(email?.trim() || "");
+      setSignedInAccount(profile.email || profile.phone);
       setDraft((current) => {
         const nextDraft = savedDraft || current;
-        return nextDraft.email || !email
-          ? nextDraft
-          : { ...nextDraft, email };
+        return {
+          ...nextDraft,
+          email: nextDraft.email || profile.email,
+          displayName: nextDraft.displayName || profile.displayName,
+          avatarUrl: nextDraft.avatarUrl || profile.avatarUrl,
+          sourceProvider: profile.provider || nextDraft.sourceProvider,
+          avatar: nextDraft.avatar || profile.avatar,
+        };
       });
-      setNotice(`Signed in as ${accountEmail}. Continue creating your profile.`);
+      setNotice(
+        `Signed in as ${accountName}. Your consented profile details have been added where available.`,
+      );
       setStep((current) =>
         current === 1 ? requestedStep : current,
       );
@@ -291,9 +325,9 @@ export default function OnboardingWizard() {
       cleanCallbackUrl();
     };
     let checkedAccessToken = "";
-    const handleSession = (accessToken: string, email?: string) => {
+    const handleSession = (accessToken: string, user: ConnectedUser) => {
       if (redirecting || !active) return;
-      acceptSession(email);
+      acceptSession(user);
       if (checkedAccessToken === accessToken) return;
       checkedAccessToken = accessToken;
       void openSubmittedProfile(accessToken);
@@ -307,7 +341,7 @@ export default function OnboardingWizard() {
         const { data, error } = await supabase.auth.getSession();
         if (!active) return;
         if (data.session) {
-          handleSession(data.session.access_token, data.session.user.email);
+          handleSession(data.session.access_token, data.session.user);
           return;
         }
         if (callbackError) {
@@ -337,7 +371,7 @@ export default function OnboardingWizard() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        handleSession(session.access_token, session.user.email);
+        handleSession(session.access_token, session.user);
       }
       else if (event === "SIGNED_OUT") {
         setAuthStatus("signed-out");
@@ -379,7 +413,7 @@ export default function OnboardingWizard() {
   const progress = useMemo(() => Math.round((step / 5) * 100), [step]);
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
-  const social = async (provider: "google" | "apple") => {
+  const social = async (provider: EntryProvider) => {
     const supabase = getSupabaseBrowser();
     if (!supabase) {
       setNotice(
@@ -605,12 +639,21 @@ export default function OnboardingWizard() {
             ) : (
               <>
                 {authStatus === "checking" && <small>Checking your existing sign-in…</small>}
-                {(googleEnabled || appleEnabled) && <div className="entry-options">
+                {(googleEnabled || facebookEnabled || linkedinEnabled || appleEnabled || microsoftEnabled) && <div className="entry-options">
                   {googleEnabled && <button onClick={() => void social("google")}>
                     G&nbsp; Continue with Google
                   </button>}
+                  {facebookEnabled && <button onClick={() => void social("facebook")}>
+                    f&nbsp; Continue with Facebook
+                  </button>}
+                  {linkedinEnabled && <button onClick={() => void social("linkedin_oidc")}>
+                    in&nbsp; Continue with LinkedIn
+                  </button>}
                   {appleEnabled && <button onClick={() => void social("apple")}>
                     ● Continue with Apple
+                  </button>}
+                  {microsoftEnabled && <button onClick={() => void social("azure")}>
+                    ⊞&nbsp; Continue with Microsoft
                   </button>}
                 </div>}
                 <div className="phone-auth">
@@ -673,6 +716,27 @@ export default function OnboardingWizard() {
               reviewers.
             </p>
             <div className="onboarding-form">
+              {draft.avatarUrl && (
+                <div className="connected-profile">
+                  <img src={draft.avatarUrl} alt="Profile supplied by connected account" />
+                  <span>
+                    <b>Profile details received</b>
+                    <small>
+                      Prefilled with your consent from {providerName(draft.sourceProvider)}.
+                      You can edit the name and avatar below.
+                    </small>
+                  </span>
+                </div>
+              )}
+              <label>
+                Display name
+                <input
+                  value={draft.displayName}
+                  onChange={(e) => update("displayName", e.target.value)}
+                  placeholder="Your People profile name"
+                  maxLength={120}
+                />
+              </label>
               <label>
                 Avatar name
                 <input
@@ -744,7 +808,10 @@ export default function OnboardingWizard() {
               <button
                 className="primary"
                 disabled={!draft.avatar || !draft.region}
-                onClick={() => setStep(3)}
+                onClick={() => {
+                  update("profileReviewed", true);
+                  setStep(3);
+                }}
               >
                 Continue
               </button>
@@ -898,6 +965,9 @@ export default function OnboardingWizard() {
               account remains open. Submission does not collect payment.
             </p>
             <div className="review-box">
+              <span>
+                Display name <b>{draft.displayName || draft.avatar}</b>
+              </span>
               <span>
                 Avatar <b>@{draft.avatar}</b>
               </span>

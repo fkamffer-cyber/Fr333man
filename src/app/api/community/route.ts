@@ -238,6 +238,19 @@ export async function POST(req: Request) {
 
     if (entity === "profile") {
       const avatar = text(data.avatar, 40);
+      const displayName = text(data.displayName, 120) || avatar;
+      const suppliedAvatarUrl = text(data.avatarUrl, 2048);
+      let avatarUrl: string | null = null;
+      if (suppliedAvatarUrl) {
+        try {
+          const parsedAvatarUrl = new URL(suppliedAvatarUrl);
+          if (["http:", "https:"].includes(parsedAvatarUrl.protocol)) {
+            avatarUrl = parsedAvatarUrl.toString();
+          }
+        } catch {
+          avatarUrl = null;
+        }
+      }
       const region = text(data.region, 80) || "Randburg";
       if (!/^[a-zA-Z0-9._-]{3,40}$/.test(avatar)) {
         return Response.json(
@@ -360,6 +373,11 @@ export async function POST(req: Request) {
         return onboardingFailure(error);
       }
 
+      const { error: profileDetailsError } = await admin
+        .from("profiles")
+        .update({ display_name: displayName, avatar_url: avatarUrl })
+        .eq("user_id", auth.user.id);
+
       const replacedPaths = Array.from(previousPaths).filter(
         (path) => !submittedPaths.includes(path),
       );
@@ -379,6 +397,7 @@ export async function POST(req: Request) {
           typeof submission.profilePublic === "boolean"
             ? submission.profilePublic
             : profilePublic,
+        profileDetailsSaved: !profileDetailsError,
         profileUrl: "/?view=My%20page&onboarding=submitted",
       });
     }

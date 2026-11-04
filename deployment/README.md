@@ -1,6 +1,6 @@
 # FR333MAN deployment package
 
-Current application release: **v0.31.0**. Every production publish must bump the package version and add a matching entry to `CHANGELOG.md`.
+Current application release: **v0.31.1**. Every production publish must bump the package version and add a matching entry to `CHANGELOG.md`.
 
 FR333MAN is a Next.js people platform with profiles, projects, products, invitation drafts, onboarding, private credential uploads, inventory administration, a multichannel advert-approval and buyer-follow-up desk, and a supervised Paystack checkout entry point. Supabase supplies authentication, Postgres data, row-level security, and private file storage.
 
@@ -26,7 +26,10 @@ After extracting the ZIP and setting the environment variables: `pnpm install --
 | `PLATFORM_OWNER_EMAIL` | Server only | Bootstrap steward account email |
 | `NEXT_PUBLIC_SITE_URL` | Browser + server | Canonical origin, for example `https://fr333man.co.za` |
 | `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | Browser | Set to `true` only after the Google provider is configured in Supabase |
+| `NEXT_PUBLIC_FACEBOOK_AUTH_ENABLED` | Browser | Set to `true` only after Facebook Login is configured in Supabase |
+| `NEXT_PUBLIC_LINKEDIN_AUTH_ENABLED` | Browser | Set to `true` only after LinkedIn OIDC is configured in Supabase |
 | `NEXT_PUBLIC_APPLE_AUTH_ENABLED` | Browser | Set to `true` only after the Apple provider is configured in Supabase |
+| `NEXT_PUBLIC_MICROSOFT_AUTH_ENABLED` | Browser | Set to `true` only after the Azure/Microsoft provider is configured in Supabase |
 | `NEXT_PUBLIC_PHONE_AUTH_ENABLED` | Browser | Set to `true` only after the phone provider and SMS service are configured in Supabase |
 | `GOOGLE_CLOUD_VISION_API_KEY` | Server only | Authenticated product-photo recognition in My Shop; restrict this key to the Cloud Vision API |
 | `META_CATALOG_ID` | Server only | FR333MAN Commerce Manager catalogue identifier for future API publishing |
@@ -42,7 +45,7 @@ Copy `.env.example` to `.env.local` for local development. In Vercel, add values
 
 1. Create a Supabase project.
 2. Apply every SQL file in the root `supabase/migrations` directory in timestamp order, or copy the root `supabase` folder into a Supabase CLI project and run `supabase db push`. The later migrations add peopleship, People shops, product media, channel listings, advert approvals, renewals, and buyer leads.
-3. In Authentication, enable Google, Apple, and/or Phone providers and add `http://localhost:3001/onboarding`, the Vercel preview callback pattern, and `https://fr333man.co.za/onboarding` to allowed redirects.
+3. In Authentication, enable the approved Google, Facebook, LinkedIn OIDC, Apple, Microsoft and/or Phone providers and add `http://localhost:3001/onboarding`, the Vercel preview callback pattern, the Sites origin, and `https://fr333man.co.za/onboarding` to allowed redirects.
 4. Put the project URL, publishable key, and service-role key into Vercel. The service-role key is server-only.
 5. Create a user whose email matches `PLATFORM_OWNER_EMAIL`; this is the bootstrap platform steward.
 

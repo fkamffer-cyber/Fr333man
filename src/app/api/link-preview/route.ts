@@ -8,6 +8,11 @@ type Preview = {
   source: string;
   limited: boolean;
   notice?: string;
+  imported: {
+    name: boolean;
+    description: boolean;
+    image: boolean;
+  };
 };
 
 const facebookReservedPaths = new Set([
@@ -182,6 +187,11 @@ async function facebookPagePreview(url: URL): Promise<Preview | null> {
       url: url.toString(),
       source: "Facebook",
       limited: !image || (!about && !description),
+      imported: {
+        name: true,
+        description: Boolean(summary),
+        image: Boolean(image),
+      },
       notice:
         !image || !summary
           ? "Facebook supplied only part of this public Page. Confirm the source and complete the missing fields before inviting."
@@ -200,6 +210,7 @@ function limitedPreview(requested: URL, source: string): Preview {
     url: requested.toString(),
     source,
     limited: true,
+    imported: { name: false, description: false, image: false },
     notice:
       source === "Facebook"
         ? "Facebook did not expose this page's image or biography. Confirm the name and add only public, source-checked details before sending."
@@ -291,17 +302,23 @@ export async function POST(req: Request) {
         ));
     if (restrictedPage) {
       const limited = limitedPreview(original, requestedSource);
+      const usableTitle =
+        title &&
+        !/(?:log in|sign up|facebook|authwall|join linkedin|linkedin login)$/i.test(
+          title,
+        )
+          ? title
+          : limited.title;
       return Response.json({
         ...limited,
-        title:
-          title &&
-          !/(?:log in|sign up|facebook|authwall|join linkedin|linkedin login)$/i.test(
-            title,
-          )
-            ? title
-            : limited.title,
+        title: usableTitle,
         description,
         image,
+        imported: {
+          name: usableTitle !== limited.title,
+          description: Boolean(description),
+          image: Boolean(image),
+        },
       });
     }
     return Response.json({
@@ -311,6 +328,11 @@ export async function POST(req: Request) {
       url: requested.toString(),
       source: sourceName(requested.hostname),
       limited: !title || (!description && !image),
+      imported: {
+        name: Boolean(title),
+        description: Boolean(description),
+        image: Boolean(image),
+      },
     } satisfies Preview);
   } catch {
     if (fallback && ["Facebook", "LinkedIn"].includes(fallback.source))

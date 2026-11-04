@@ -1,6 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- claim flow uses full navigation and reviewed public image hosts */
 import { useEffect, useState } from "react";
+import { decodePortableInvitation } from "@/lib/invitations";
 import { release } from "../../release";
 type Invite = {
   name?: string;
@@ -21,12 +22,8 @@ export default function InviteLanding({ id }: { id: string }) {
           "data",
         );
         if (!encoded) return null;
-        const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
-        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-        const bytes = Uint8Array.from(atob(padded), (character) =>
-          character.charCodeAt(0),
-        );
-        const data = JSON.parse(new TextDecoder().decode(bytes)) as Invite;
+        const data = decodePortableInvitation(encoded) as Invite | null;
+        if (!data) return null;
         let source = new URL(String(data.sourceUrl || ""));
         if (!["http:", "https:"].includes(source.protocol)) return null;
         const sourceHost = source.hostname.toLowerCase();

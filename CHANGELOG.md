@@ -1,5 +1,14 @@
 # FR333MAN releases
 
+## v0.31.1 — Sites release 33 — 2026-11-04
+
+- Repaired signed-out invitation creation so a reviewed draft always produces a working shareable claim link.
+- Preserved tracked invitation codes for signed-in People while providing a clear portable-link fallback when tracking is unavailable.
+- Added an explicit import report so Facebook and LinkedIn restrictions cannot be mistaken for a successful photo or biography import.
+- Added real Google, Facebook, LinkedIn OIDC, Apple and Microsoft onboarding entry points that appear only after their Supabase providers are enabled.
+- Prefilled editable People display names, avatar names and profile photos from the account owner's consented OAuth profile.
+- Added regression coverage for Unicode-safe, URL-safe invitation draft encoding and decoding.
+
 ## v0.31.0 — Sites release 32 — 2026-11-03
 
 - Removed the remaining sample People, product, project and Feed-comment records from the live interface.
