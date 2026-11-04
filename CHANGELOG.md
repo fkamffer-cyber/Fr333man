@@ -1,5 +1,11 @@
 # FR333MAN releases
 
+## v0.31.3 — Sites release 35 — 2026-11-04
+
+- Repaired hosted Supabase initialization by loading the public project URL and publishable key from the deployment runtime before the client application starts.
+- Kept deployment values out of the repository while allowing one build to run correctly on both Sites and Vercel.
+- Added a no-store, same-origin public configuration response containing only the browser-safe Supabase connection values.
+
 ## v0.31.2 — Sites release 34 — 2026-11-04
 
 - Enabled the provisioned Google OAuth entry point for People onboarding on both hosted deployments.
